@@ -1,0 +1,84 @@
+#pragma once
+
+#include "core/projectdata.h"
+
+#include <QSet>
+
+// Pure editing operations on ProjectData's timeline.
+//
+// Invariants maintained by every operation:
+//  * clips on a track are sorted by start and never overlap
+//  * clips never start before 0
+//  * clips are never shorter than kMinClipDuration
+// Placing or moving clips uses "overwrite" semantics like most NLEs: whatever
+// was underneath on the destination track is trimmed, split or removed.
+namespace spotlight::timeline {
+
+// Linked clips (e.g. a video clip and its audio) are edited as a group.
+QVector<QUuid> groupOf(const ProjectData &d, const QUuid &clipId);
+
+// Index of the clip covering time t on the track, or -1.
+int clipIndexAt(const Track &track, TimeUs t);
+
+// Removes all material in [from, to) on the track.
+void clearRange(Track &track, TimeUs from, TimeUs to);
+
+// Inserts a clip keeping the track sorted (caller ensures the space is free).
+void insertSorted(Track &track, const Clip &clip);
+
+// Places media on the timeline. Video files with sound get a linked audio clip
+// on the matching audio track (V1 -> A1, V2 -> A2, created if missing).
+// out < 0 means "to the end of the media". Returns the primary clip id or a
+// null id if nothing could be placed.
+QUuid placeMedia(ProjectData &d, const QUuid &mediaId, int trackIndex, TimeUs start, TimeUs in = 0,
+                 TimeUs out = -1);
+
+// Moves a clip (and its linked partners by the same offset). The primary clip
+// may change to another track of the same type. Returns false if nothing moved.
+bool moveClip(ProjectData &d, const QUuid &clipId, TimeUs newStart, int newTrackIndex);
+
+// Trims the clip's head/tail to the requested timeline time, clamped to media
+// bounds and neighbouring clips. Linked partners are trimmed identically.
+bool trimClipStart(ProjectData &d, const QUuid &clipId, TimeUs newStart);
+bool trimClipEnd(ProjectData &d, const QUuid &clipId, TimeUs newEnd);
+
+// Splits the given clips (plus linked partners) at time `at`.
+// Returns the ids of the newly created right-hand pieces.
+QVector<QUuid> splitClips(ProjectData &d, const QVector<QUuid> &clipIds, TimeUs at);
+
+// Splits every clip under `at` on unlocked tracks (the "razor at playhead").
+QVector<QUuid> splitAll(ProjectData &d, TimeUs at);
+
+// Deletes clips (plus linked partners). With ripple, later clips on the same
+// tracks shift left to close the gap.
+int removeClips(ProjectData &d, const QVector<QUuid> &clipIds, bool ripple);
+
+// Removes a media item and every clip that uses it.
+void removeMedia(ProjectData &d, const QUuid &mediaId);
+
+// Top-most visible video clip at time t (higher video tracks win).
+const Clip *topVideoClipAt(const ProjectData &d, TimeUs t, int *trackIndex = nullptr);
+
+// The timeline flattened into consecutive video segments from 0 to the
+// project duration. clipId is null for gaps (rendered black).
+struct VideoSegment {
+    TimeUs start = 0;
+    TimeUs end = 0;
+    QUuid clipId;
+    int trackIndex = -1;
+    TimeUs duration() const { return end - start; }
+};
+QVector<VideoSegment> videoSegments(const ProjectData &d);
+
+// Whether an audio track is heard, honouring mute and solo.
+bool isTrackAudible(const ProjectData &d, int trackIndex);
+
+// Snaps t to the nearest clip edge (or extra point such as the playhead)
+// within threshold. Clips in `exclude` are ignored.
+TimeUs snapTime(const ProjectData &d, TimeUs t, TimeUs threshold, const QSet<QUuid> &exclude = {},
+                const QVector<TimeUs> &extraPoints = {});
+
+// Envelope multiplier (0..1) for a clip's fades at timeline time t.
+double fadeEnvelope(const Clip &c, TimeUs t);
+
+} // namespace spotlight::timeline

@@ -1,0 +1,10 @@
+build*/
+cmake-build-*/
+.qtcreator/
+CMakeLists.txt.user*
+*.AppImage
+*.dmg
+dist/
+.DS_Store
+packaging/macos/spotlight.icns
+packaging/macos/spotlight.iconset/

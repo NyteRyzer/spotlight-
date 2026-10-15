@@ -1,0 +1,65 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ ffmpeg file \
+            qt6-base-dev qt6-base-dev-tools qt6-multimedia-dev qt6-qpa-plugins \
+            libqt6multimedia6 libgl1-mesa-dev libfuse2
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Package (.deb / .tar.gz)
+        run: cd build && cpack
+      - name: Package (AppImage)
+        run: packaging/linux/build-appimage.sh build-appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spotlight-linux
+          path: |
+            build/*.deb
+            build/*.tar.gz
+            build-appimage/*.AppImage
+
+  macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install qt ffmpeg ninja librsvg
+      - name: App icon
+        run: packaging/macos/make-icns.sh
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Package (.dmg)
+        run: cd build && cpack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spotlight-macos
+          path: build/*.dmg

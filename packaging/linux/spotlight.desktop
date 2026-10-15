@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SPOTLIGHT!
+GenericName=Creative Studio
+Comment=Edit video, mix audio and design thumbnails in one app
+Exec=spotlight %f
+Icon=spotlight
+Terminal=false
+Categories=AudioVideo;Video;AudioVideoEditing;Graphics;
+MimeType=application/x-spotlight-project;
+Keywords=video;editor;audio;mixer;thumbnail;design;youtube;
+StartupWMClass=spotlight
