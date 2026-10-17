@@ -87,9 +87,67 @@ jobs:
           name: spotlight-macos
           path: build-dmg/*.dmg
 
+  macos-intel:
+    name: macOS (Intel)
+    # Built against the official Qt 6.8 LTS binaries (macOS 12+) and static
+    # FFmpeg, because Homebrew bottles on this runner require macOS 15.
+    runs-on: macos-15-intel
+    env:
+      QT_VERSION: '6.8.3'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install build tools
+        run: |
+          brew install ninja librsvg
+          python3 -m pip install --break-system-packages aqtinstall
+      - name: Install Qt ${{ env.QT_VERSION }}
+        run: |
+          python3 -m aqt install-qt mac desktop "$QT_VERSION" clang_64 -m qtmultimedia --outputdir "$HOME/Qt"
+          echo "QT_PREFIX=$HOME/Qt/$QT_VERSION/macos" >> "$GITHUB_ENV"
+      - name: Fetch static FFmpeg
+        run: |
+          packaging/macos/fetch-ffmpeg.sh "$HOME/ffmpeg-static" x86_64
+          echo "FFMPEG_BIN=$HOME/ffmpeg-static" >> "$GITHUB_ENV"
+          echo "$HOME/ffmpeg-static" >> "$GITHUB_PATH"
+      - name: App icon
+        run: packaging/macos/make-icns.sh
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_OSX_ARCHITECTURES=x86_64
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Package (.dmg)
+        run: packaging/macos/build-dmg.sh build-dmg
+        env:
+          DEPLOY_TARGET: '12.0'
+          DMG_LABEL: Intel
+      - name: Check architecture and minimum macOS
+        run: |
+          APP=build-dmg/dmg/SPOTLIGHT.app
+          lipo -archs "$APP/Contents/MacOS/SPOTLIGHT"
+          lipo -archs "$APP/Contents/MacOS/SPOTLIGHT" | grep -qw x86_64
+          vtool -show-build "$APP/Contents/MacOS/SPOTLIGHT" | grep -E 'minos|version' | head -3
+      - name: Smoke test app bundle
+        run: |
+          APP=build-dmg/dmg/SPOTLIGHT.app
+          "$APP/Contents/MacOS/SPOTLIGHT" &
+          pid=$!
+          sleep 10
+          kill -0 "$pid" || { echo "SPOTLIGHT exited early"; exit 1; }
+          kill "$pid"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spotlight-macos-intel
+          path: build-dmg/*.dmg
+
   release:
     name: Publish release
-    needs: [linux, macos]
+    needs: [linux, macos, macos-intel]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ubuntu-24.04
     permissions:
@@ -117,7 +175,9 @@ jobs:
           body: |
             Downloads for SPOTLIGHT! — all-in-one video, audio and design studio.
 
-            **macOS (Apple Silicon, macOS 14 Sonoma or newer)** — `SPOTLIGHT-*-macOS-arm64.dmg`
+            **macOS — Apple Silicon (M1/M2/M3/M4…, macOS 14 Sonoma or newer)** — `SPOTLIGHT-*-macOS-arm64.dmg`
+            **macOS — Intel (macOS 12 Monterey or newer)** — `SPOTLIGHT-*-macOS-Intel.dmg`
+            Not sure which? Apple menu → About This Mac: "Chip: Apple M…" = Apple Silicon, "Processor: Intel" = Intel.
             Open the .dmg and drag SPOTLIGHT! to Applications. The app isn't notarized yet, so the first time
             macOS will block it: open **System Settings → Privacy & Security** and click **Open Anyway**
             (or run `xattr -dr com.apple.quarantine /Applications/SPOTLIGHT.app`).

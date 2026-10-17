@@ -72,6 +72,7 @@ Ready-made builds are on the [Releases page](https://github.com/NyteRyzer/spotli
 | Platform | File | Notes |
 |---|---|---|
 | macOS 14+ (Apple Silicon) | `SPOTLIGHT-<ver>-macOS-arm64.dmg` | Drag to Applications. Not notarized yet: on first launch use **System Settings → Privacy & Security → Open Anyway**. |
+| macOS 12+ (Intel) | `SPOTLIGHT-<ver>-macOS-Intel.dmg` | Same as above. Built against the official Qt 6.8 LTS with static FFmpeg. |
 | Linux x86_64 (2024+ distros) | `SPOTLIGHT-<ver>-x86_64.AppImage` | `chmod +x` and run — nothing to install. |
 | Ubuntu 24.04 / Debian 13 | `spotlight-<ver>-linux-x86_64.deb` | `sudo apt install ./spotlight-*.deb` |
 
@@ -89,6 +90,10 @@ open build/src/app/SPOTLIGHT.app
 ```
 Installer: `packaging/macos/build-dmg.sh` (needs `brew install librsvg` for the icon) → `build-macos/SPOTLIGHT-<ver>-macOS-arm64.dmg`,
 a self-contained app with Qt, ffmpeg and ffprobe bundled and an ad-hoc signature.
+
+Intel Mac installer (runs on macOS 12+): install Qt 6.8 from qt.io (or `pip install aqtinstall && aqt install-qt mac desktop 6.8.3 clang_64 -m qtmultimedia`),
+fetch static FFmpeg with `packaging/macos/fetch-ffmpeg.sh ~/ffmpeg-static x86_64`, then
+`QT_PREFIX=~/Qt/6.8.3/macos FFMPEG_BIN=~/ffmpeg-static DEPLOY_TARGET=12.0 DMG_LABEL=Intel packaging/macos/build-dmg.sh`.
 
 ### Linux (Ubuntu 24.04 / Debian 13)
 ```bash
@@ -108,7 +113,7 @@ Unit tests cover timeline editing, project files, undo, autosave/recovery and ex
 an end-to-end test renders a real file with FFmpeg, and a GUI smoke test drives the whole window offscreen.
 
 CI (`.github/workflows/build.yml`) builds, tests, packages and smoke-launches the installers on Ubuntu 24.04 and
-macOS 14 (Apple Silicon). Pushing a `v*` tag (or running the workflow with a release tag) publishes the `.dmg`,
+macOS (Apple Silicon and Intel). Pushing a `v*` tag (or running the workflow with a release tag) publishes the `.dmg`,
 `.AppImage`, `.deb` and `.tar.gz` on a GitHub Release.
 
 ## Project layout

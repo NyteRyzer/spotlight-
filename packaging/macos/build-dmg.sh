@@ -7,22 +7,30 @@
 #
 # Requires: Homebrew packages qt, ffmpeg, cmake, ninja (and librsvg for the icon).
 # Usage: packaging/macos/build-dmg.sh [build-dir]
+#
+# Optional environment overrides (used by the Intel build, which targets older
+# macOS than Homebrew's bottles support):
+#   QT_PREFIX       Qt installation to build against (default: brew --prefix qt)
+#   FFMPEG_BIN      directory holding ffmpeg + ffprobe (default: Homebrew's)
+#   DEPLOY_TARGET   minimum macOS version (default: 14.0)
+#   DMG_LABEL       platform label in the file name (default: uname -m)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BUILD="${1:-$ROOT/build-macos}"
 mkdir -p "$BUILD" && BUILD="$(cd "$BUILD" && pwd)"
-QT_PREFIX="$(brew --prefix qt)"
-FFMPEG_PREFIX="$(brew --prefix ffmpeg)"
+QT_PREFIX="${QT_PREFIX:-$(brew --prefix qt)}"
+FFMPEG_BIN="${FFMPEG_BIN:-$(brew --prefix ffmpeg)/bin}"
+DEPLOY_TARGET="${DEPLOY_TARGET:-14.0}"
 VERSION="$(grep -A2 '^project(' "$ROOT/CMakeLists.txt" | grep -m1 -oE 'VERSION [0-9.]+' | cut -d' ' -f2)"
-ARCH="$(uname -m)"
+DMG_LABEL="${DMG_LABEL:-$(uname -m)}"
 
 if [ ! -f "$ROOT/packaging/macos/spotlight.icns" ] && command -v rsvg-convert >/dev/null; then
   "$ROOT/packaging/macos/make-icns.sh"
 fi
 
 cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DSPOTLIGHT_BUILD_TESTS=OFF
+  -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOY_TARGET" -DSPOTLIGHT_BUILD_TESTS=OFF
 cmake --build "$BUILD"
 
 STAGE="$BUILD/dmg"
@@ -31,18 +39,22 @@ rm -rf "$STAGE" && mkdir -p "$STAGE"
 cp -R "$BUILD/src/app/SPOTLIGHT.app" "$APP"
 
 for tool in ffmpeg ffprobe; do
-  cp "$FFMPEG_PREFIX/bin/$tool" "$APP/Contents/MacOS/$tool"
+  cp "$FFMPEG_BIN/$tool" "$APP/Contents/MacOS/$tool"
   chmod u+w "$APP/Contents/MacOS/$tool"
 done
 
 # Deploys Qt plus all non-system dylibs used by the app and the two tools.
-BREW_LIB="$(brew --prefix)/lib"
-"$QT_PREFIX/bin/macdeployqt" "$APP" -always-overwrite \
-  -libpath="$BREW_LIB" -libpath="$FFMPEG_PREFIX/lib" -libpath="$QT_PREFIX/lib" \
+# Library search paths for dependencies referenced via @rpath.
+LIBPATHS=(-libpath="$QT_PREFIX/lib" -libpath="$FFMPEG_BIN/../lib")
+if command -v brew >/dev/null; then
+  LIBPATHS+=(-libpath="$(brew --prefix)/lib")
+fi
+"$QT_PREFIX/bin/macdeployqt" "$APP" -always-overwrite "${LIBPATHS[@]}" \
   -executable="$APP/Contents/MacOS/ffmpeg" \
   -executable="$APP/Contents/MacOS/ffprobe"
 
-# Nothing may still point into Homebrew, or the app breaks on other Macs.
+# Nothing may still point into Homebrew or the Qt install, or the app breaks
+# on other Macs.
 leaks=0
 while IFS= read -r -d '' f; do
   if file "$f" | grep -q 'Mach-O'; then
@@ -50,8 +62,8 @@ while IFS= read -r -d '' f; do
     # commands matter.
     own="$(otool -D "$f" 2>/dev/null | tail -n +2 | head -1)"
     deps="$(otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -vxF "${own:-<none>}" || true)"
-    if echo "$deps" | grep -E '^/(opt/homebrew|usr/local)/' >/dev/null; then
-      echo "Unbundled dependency in $f:"; echo "$deps" | grep -E '^/(opt/homebrew|usr/local)/'
+    if echo "$deps" | grep -E "^(/opt/homebrew/|/usr/local/|$QT_PREFIX/)" >/dev/null; then
+      echo "Unbundled dependency in $f:"; echo "$deps" | grep -E "^(/opt/homebrew/|/usr/local/|$QT_PREFIX/)"
       leaks=1
     fi
   fi
@@ -66,7 +78,7 @@ codesign --verify --deep --strict "$APP"
 "$APP/Contents/MacOS/ffprobe" -version | head -1
 
 ln -s /Applications "$STAGE/Applications"
-DMG="$BUILD/SPOTLIGHT-$VERSION-macOS-$ARCH.dmg"
+DMG="$BUILD/SPOTLIGHT-$VERSION-macOS-$DMG_LABEL.dmg"
 rm -f "$DMG"
 hdiutil create -volname "SPOTLIGHT!" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 echo "$DMG"
