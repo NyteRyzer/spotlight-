@@ -8,12 +8,16 @@
 #include <QTimer>
 
 class QMediaPlayer;
+class QProcess;
 class QVideoSink;
 
 namespace spotlight {
 
 // Reads duration, streams and resolution of media files and grabs a
 // thumbnail. Files are processed one at a time in the order queued.
+//
+// ffprobe/ffmpeg are used when available (fast and identical on every
+// platform); otherwise Qt Multimedia is used as a fallback.
 class MediaProbe : public QObject {
     Q_OBJECT
 public:
@@ -34,6 +38,10 @@ private:
     void next();
     void finish();
     void fail(const QString &error);
+    void probeWithFfprobe(const QString &ffprobe);
+    void grabThumbnailWithFfmpeg();
+    void probeWithQt();
+    void readPlayerInfo();
 
     QQueue<QString> m_queue;
     QString m_current;
@@ -42,6 +50,7 @@ private:
     bool m_seeking = false;
     QMediaPlayer *m_player = nullptr;
     QVideoSink *m_sink = nullptr;
+    QProcess *m_process = nullptr;
     QTimer m_timeout;
 };
 

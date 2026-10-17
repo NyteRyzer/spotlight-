@@ -235,11 +235,23 @@ QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &p
 
 QString Exporter::findFfmpeg()
 {
+    return findTool(QStringLiteral("ffmpeg"));
+}
+
+QString Exporter::findFfprobe()
+{
+    return findTool(QStringLiteral("ffprobe"));
+}
+
+QString Exporter::findTool(const QString &name)
+{
 #ifdef Q_OS_WIN
-    const QString exe = QStringLiteral("ffmpeg.exe");
+    const QString exe = name + QStringLiteral(".exe");
 #else
-    const QString exe = QStringLiteral("ffmpeg");
+    const QString exe = name;
 #endif
+    // Bundled copies first: next to the binary (Linux AppImage, macOS
+    // Contents/MacOS), then Contents/Resources and lib/spotlight.
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList bundled{appDir + QLatin1Char('/') + exe, appDir + QStringLiteral("/../Resources/") + exe,
                               appDir + QStringLiteral("/../lib/spotlight/") + exe};
@@ -250,6 +262,7 @@ QString Exporter::findFfmpeg()
     const QString onPath = QStandardPaths::findExecutable(exe);
     if (!onPath.isEmpty())
         return onPath;
+    // GUI apps on macOS don't inherit the shell PATH.
     return QStandardPaths::findExecutable(exe, {QStringLiteral("/opt/homebrew/bin"), QStringLiteral("/usr/local/bin"),
                                                 QStringLiteral("/opt/local/bin"), QStringLiteral("/usr/bin"),
                                                 QStringLiteral("/snap/bin")});

@@ -30,6 +30,9 @@ public:
     // Locates an ffmpeg binary: bundled next to the app first, then PATH and
     // common install locations (GUI apps on macOS don't inherit the shell PATH).
     static QString findFfmpeg();
+    static QString findFfprobe();
+    // Shared lookup used by both (name without extension).
+    static QString findTool(const QString &name);
 
     // Default file extension for a preset's container.
     static QString extensionFor(const ExportPreset &preset);

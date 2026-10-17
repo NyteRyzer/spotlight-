@@ -1,23 +1,33 @@
 name: Build
 
+# Every push builds and tests both platforms and uploads the installers as
+# workflow artifacts. Pushing a tag like v0.1.0 (or running the workflow by
+# hand with a release tag) also publishes them on a GitHub Release.
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish a GitHub Release with this tag (e.g. v0.1.0). Leave empty to only build.'
+        required: false
+        default: ''
 
 jobs:
   linux:
-    name: Linux (Ubuntu 24.04)
+    name: Linux (x86_64)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ ffmpeg file \
+            cmake ninja-build g++ ffmpeg file xvfb xauth \
             qt6-base-dev qt6-base-dev-tools qt6-multimedia-dev qt6-qpa-plugins \
-            libqt6multimedia6 libgl1-mesa-dev libfuse2
+            libqt6multimedia6 libgl1-mesa-dev
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
       - name: Build
@@ -30,27 +40,32 @@ jobs:
         run: cd build && cpack
       - name: Package (AppImage)
         run: packaging/linux/build-appimage.sh build-appimage
+      - name: Smoke test AppImage
+        run: |
+          set +e
+          APPIMAGE_EXTRACT_AND_RUN=1 timeout 10 xvfb-run -a build-appimage/SPOTLIGHT-*.AppImage
+          code=$?
+          # 124 = still running when the timeout stopped it, i.e. it started fine.
+          [ "$code" -eq 124 ] || { echo "AppImage exited early with $code"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: spotlight-linux
           path: |
             build/*.deb
             build/*.tar.gz
-            build-appimage/*.AppImage
+            build-appimage/SPOTLIGHT-*.AppImage
 
   macos:
     name: macOS (Apple Silicon)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: brew install qt ffmpeg ninja librsvg
       - name: App icon
         run: packaging/macos/make-icns.sh
       - name: Configure
-        run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
       - name: Build
         run: cmake --build build
       - name: Test
@@ -58,8 +73,53 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
       - name: Package (.dmg)
-        run: cd build && cpack
+        run: packaging/macos/build-dmg.sh build-dmg
+      - name: Smoke test app bundle
+        run: |
+          APP=build-dmg/dmg/SPOTLIGHT.app
+          "$APP/Contents/MacOS/SPOTLIGHT" &
+          pid=$!
+          sleep 10
+          kill -0 "$pid" || { echo "SPOTLIGHT exited early"; exit 1; }
+          kill "$pid"
       - uses: actions/upload-artifact@v4
         with:
           name: spotlight-macos
-          path: build/*.dmg
+          path: build-dmg/*.dmg
+
+  release:
+    name: Publish release
+    needs: [linux, macos]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List files
+        run: ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: SPOTLIGHT! ${{ inputs.release_tag || github.ref_name }}
+          prerelease: true
+          files: dist/*
+          body: |
+            Downloads for SPOTLIGHT! — all-in-one video, audio and design studio.
+
+            **macOS (Apple Silicon, macOS 14 Sonoma or newer)** — `SPOTLIGHT-*-macOS-arm64.dmg`
+            Open the .dmg and drag SPOTLIGHT! to Applications. The app isn't notarized yet, so the first time
+            macOS will block it: open **System Settings → Privacy & Security** and click **Open Anyway**
+            (or run `xattr -dr com.apple.quarantine /Applications/SPOTLIGHT.app`).
+
+            **Linux (x86_64)**
+            * `SPOTLIGHT-*-x86_64.AppImage` — portable, no install: `chmod +x SPOTLIGHT-*.AppImage && ./SPOTLIGHT-*.AppImage`
+              (needs a distro from 2024 or newer, e.g. Ubuntu 24.04, Fedora 40, Debian 13)
+            * `spotlight-*-linux-x86_64.deb` — Ubuntu 24.04 / Debian 13: `sudo apt install ./spotlight-*.deb`
+            * `spotlight-*-linux-x86_64.tar.gz` — plain binaries
+
+            FFmpeg is bundled in the .dmg and the AppImage; the .deb installs it as a dependency.

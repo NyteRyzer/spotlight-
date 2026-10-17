@@ -3,6 +3,7 @@
 #include "core/imageops.h"
 
 #include <QFont>
+#include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QImageReader>
 #include <QPainter>
@@ -38,7 +39,8 @@ QImage DesignRenderer::adjustedImage(const DesignLayer &l)
 
 QPainterPath DesignRenderer::textPath(const DesignLayer &l)
 {
-    QFont font(l.fontFamily.isEmpty() ? QStringLiteral("Sans Serif") : l.fontFamily);
+    // Without an explicit family, use the platform's UI font (exists everywhere).
+    QFont font = l.fontFamily.isEmpty() ? QFontDatabase::systemFont(QFontDatabase::GeneralFont) : QFont(l.fontFamily);
     font.setPixelSize(std::max(4, l.fontSize));
     font.setBold(l.bold);
     const QFontMetricsF fm(font);

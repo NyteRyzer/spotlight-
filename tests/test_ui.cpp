@@ -21,6 +21,7 @@ private slots:
     {
         QStandardPaths::setTestModeEnabled(true);
         qputenv("QT_MEDIA_BACKEND", "ffmpeg"); // same backend the app selects in main()
+        Q_INIT_RESOURCE(resources);
         theme::apply(*qApp);
     }
 
@@ -54,6 +55,7 @@ private slots:
         auto *design = w.findChild<DesignStudio *>();
         auto *project = w.findChild<Project *>();
         QVERIFY(video && design && project);
+        QVERIFY2(QFile::exists(QStringLiteral(":/icons/spotlight.svg")), "app icon resource missing");
 
         // Import a generated clip if ffmpeg is available.
         const QString ffmpeg = Exporter::findFfmpeg();

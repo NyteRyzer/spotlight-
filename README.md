@@ -65,6 +65,16 @@ filmmakers, and anyone else making things.
 
 (`Ctrl` is `⌘` on macOS.)
 
+## Download
+
+Ready-made builds are on the [Releases page](https://github.com/NyteRyzer/spotlight-/releases):
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS 14+ (Apple Silicon) | `SPOTLIGHT-<ver>-macOS-arm64.dmg` | Drag to Applications. Not notarized yet: on first launch use **System Settings → Privacy & Security → Open Anyway**. |
+| Linux x86_64 (2024+ distros) | `SPOTLIGHT-<ver>-x86_64.AppImage` | `chmod +x` and run — nothing to install. |
+| Ubuntu 24.04 / Debian 13 | `spotlight-<ver>-linux-x86_64.deb` | `sudo apt install ./spotlight-*.deb` |
+
 ## Building
 
 Requirements: CMake ≥ 3.21, a C++17 compiler, **Qt ≥ 6.4** (Core, Gui, Widgets, Multimedia), and
@@ -77,9 +87,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(b
 cmake --build build
 open build/src/app/SPOTLIGHT.app
 ```
-Installer: `packaging/macos/make-icns.sh` (needs `brew install librsvg`) then `cd build && cpack` → `SPOTLIGHT-<ver>-macOS-arm64.dmg`
-(Qt is bundled by `macdeployqt`). To ship an ffmpeg binary inside the app, configure with
-`-DSPOTLIGHT_BUNDLE_FFMPEG=/path/to/static/ffmpeg`.
+Installer: `packaging/macos/build-dmg.sh` (needs `brew install librsvg` for the icon) → `build-macos/SPOTLIGHT-<ver>-macOS-arm64.dmg`,
+a self-contained app with Qt, ffmpeg and ffprobe bundled and an ad-hoc signature.
 
 ### Linux (Ubuntu 24.04 / Debian 13)
 ```bash
@@ -89,7 +98,7 @@ cmake --build build
 ./build/src/app/spotlight
 ```
 Installers: `cd build && cpack` → `.deb` and `.tar.gz`; `packaging/linux/build-appimage.sh` → portable `.AppImage`
-(bundles Qt and ffmpeg). Fedora: `sudo dnf install qt6-qtbase-devel qt6-qtmultimedia-devel ffmpeg cmake gcc-c++`.
+(bundles Qt, ffmpeg and ffprobe). Fedora: `sudo dnf install qt6-qtbase-devel qt6-qtmultimedia-devel ffmpeg cmake gcc-c++`.
 
 ### Tests
 ```bash
@@ -98,8 +107,9 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 Unit tests cover timeline editing, project files, undo, autosave/recovery and export command generation;
 an end-to-end test renders a real file with FFmpeg, and a GUI smoke test drives the whole window offscreen.
 
-CI (`.github/workflows/build.yml`) builds, tests and packages on Ubuntu 24.04 and macOS 14 (Apple Silicon),
-uploading the `.deb`, `.tar.gz`, `.AppImage` and `.dmg` as artifacts.
+CI (`.github/workflows/build.yml`) builds, tests, packages and smoke-launches the installers on Ubuntu 24.04 and
+macOS 14 (Apple Silicon). Pushing a `v*` tag (or running the workflow with a release tag) publishes the `.dmg`,
+`.AppImage`, `.deb` and `.tar.gz` on a GitHub Release.
 
 ## Project layout
 
