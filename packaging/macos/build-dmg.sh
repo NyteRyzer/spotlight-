@@ -36,7 +36,9 @@ for tool in ffmpeg ffprobe; do
 done
 
 # Deploys Qt plus all non-system dylibs used by the app and the two tools.
+BREW_LIB="$(brew --prefix)/lib"
 "$QT_PREFIX/bin/macdeployqt" "$APP" -always-overwrite \
+  -libpath="$BREW_LIB" -libpath="$FFMPEG_PREFIX/lib" -libpath="$QT_PREFIX/lib" \
   -executable="$APP/Contents/MacOS/ffmpeg" \
   -executable="$APP/Contents/MacOS/ffprobe"
 
@@ -44,8 +46,12 @@ done
 leaks=0
 while IFS= read -r -d '' f; do
   if file "$f" | grep -q 'Mach-O'; then
-    if otool -L "$f" | tail -n +2 | grep -E '/(opt/homebrew|usr/local)/' >/dev/null; then
-      echo "Unbundled dependency in $f:"; otool -L "$f" | grep -E '/(opt/homebrew|usr/local)/'
+    # Skip the library's own install name (otool -D); only real load
+    # commands matter.
+    own="$(otool -D "$f" 2>/dev/null | tail -n +2 | head -1)"
+    deps="$(otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -vxF "${own:-<none>}" || true)"
+    if echo "$deps" | grep -E '^/(opt/homebrew|usr/local)/' >/dev/null; then
+      echo "Unbundled dependency in $f:"; echo "$deps" | grep -E '^/(opt/homebrew|usr/local)/'
       leaks=1
     fi
   fi
