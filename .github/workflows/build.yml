@@ -100,14 +100,20 @@ jobs:
           path: dist
           merge-multiple: true
       - name: List files
-        run: ls -la dist
+        run: find dist -type f -exec ls -la {} +
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
           name: SPOTLIGHT! ${{ inputs.release_tag || github.ref_name }}
           prerelease: true
-          files: dist/*
+          # Artifacts keep their folders (build/, build-appimage/, ...).
+          files: |
+            dist/**/*.dmg
+            dist/**/*.AppImage
+            dist/**/*.deb
+            dist/**/*.tar.gz
+          fail_on_unmatched_files: true
           body: |
             Downloads for SPOTLIGHT! — all-in-one video, audio and design studio.
 
