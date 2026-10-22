@@ -87,12 +87,28 @@ private slots:
         QVERIFY(!args.contains("-i")); // no inputs needed
     }
 
+    void reportsMissingMedia()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid used = addVideo(d, 3 * S, false, "/no/such/used.mp4");
+        addVideo(d, 3 * S, false, "/no/such/unused.mp4"); // in the bin only
+        timeline::placeMedia(d, used, 0, 0);
+        const QStringList missing = Exporter::missingMedia(d);
+        QCOMPARE(missing.size(), 1);
+
+        Exporter ex;
+        QString err;
+        QVERIFY(!ex.start(d, builtInExportPresets().first(), "/tmp/never.mp4", &err));
+        if (!Exporter::findFfmpeg().isEmpty())
+            QVERIFY2(err.contains("Relink"), qPrintable(err));
+    }
+
     // End-to-end render with real FFmpeg, using generated test media.
     void rendersWithFfmpeg()
     {
         const QString ffmpeg = Exporter::findFfmpeg();
         if (ffmpeg.isEmpty())
-            QSKIP("ffmpeg not installed");
+            QSKIP("ffmpeg not installed", "");
 
         QTemporaryDir tmp;
         const QString src = tmp.path() + "/src.mp4";

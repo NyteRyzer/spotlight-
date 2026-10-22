@@ -30,7 +30,9 @@ TimelinePlayer::TimelinePlayer(Project *project, VideoView *view, QObject *paren
     connect(&m_timer, &QTimer::timeout, this, &TimelinePlayer::tick);
     connect(project, &Project::changed, this, [this] {
         m_pos = std::min(m_pos, m_project->data().duration());
-        sync(true);
+        // While playing, let drift correction handle it; a forced seek on
+        // every edit (fader moves, inspector tweaks) makes audio stutter.
+        sync(!m_playing);
     });
     sync(true);
 }

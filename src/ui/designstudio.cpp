@@ -307,7 +307,6 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
         }
     });
     connect(project, &Project::changed, this, [this] {
-        m_canvas->renderer()->clearCache();
         rebuildLayers();
         refreshProperties();
     });

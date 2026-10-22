@@ -233,6 +233,19 @@ void MediaBin::removeSelected()
 
 void MediaBin::rebuild()
 {
+    // The project changes on every edit anywhere (timeline drags, fader
+    // moves...); only rebuild when what the bin shows actually differs, so
+    // selection and scroll position survive.
+    QString signature;
+    for (const MediaItem &m : m_project->data().media) {
+        signature += m.id.toString() + m.path + m.name + QString::number(m.duration)
+            + (QFileInfo::exists(m.path) ? QLatin1Char('1') : QLatin1Char('0'))
+            + (m_thumbs.contains(m.path) ? QLatin1Char('t') : QLatin1Char('-'));
+    }
+    if (signature == m_shownSignature && m_list->count() == m_project->data().media.size())
+        return;
+    m_shownSignature = signature;
+
     const QUuid current = currentMedia();
     m_list->clear();
     for (const MediaItem &m : m_project->data().media) {

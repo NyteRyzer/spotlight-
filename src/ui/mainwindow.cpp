@@ -18,7 +18,15 @@
 #include "ui/videostudio.h"
 
 #include <QApplication>
+#include <QAbstractItemView>
+#include <QAbstractSlider>
+#include <QAbstractSpinBox>
 #include <QCloseEvent>
+#include <QComboBox>
+#include <QKeyEvent>
+#include <QKeySequenceEdit>
+#include <QPlainTextEdit>
+#include <QTextEdit>
 #include <QDockWidget>
 #include <QLineEdit>
 #include <QDateTime>
@@ -111,6 +119,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_autosave->setIntervalSeconds(s.value(QStringLiteral("autosave/interval"), 120).toInt());
 
     buildMenus();
+    // Let focused input controls keep keys that are also global shortcuts.
+    qApp->installEventFilter(this);
     for (int i = 0; i < 3; ++i)
         m_defaultLayouts[i] = studio(i)->saveState();
     restoreLayouts();
@@ -212,7 +222,12 @@ void MainWindow::buildMenus()
     edit->addSeparator();
     edit->addAction(keys);
     connect(del, &QAction::triggered, this, [this] {
-        if (m_stack->currentIndex() == Design)
+        // Delete acts on whatever panel has focus: the media bin removes
+        // media, otherwise the current studio's selection is deleted.
+        QWidget *focus = QApplication::focusWidget();
+        if (focus && m_video->mediaBin()->isAncestorOf(focus))
+            m_video->mediaBin()->removeSelected();
+        else if (m_stack->currentIndex() == Design)
             m_design->deleteSelected();
         else
             activeTimeline()->deleteSelection(false);
@@ -559,6 +574,33 @@ void MainWindow::rebuildLayoutMenu()
     }
     s.endGroup();
     m_layoutMenu->setEnabled(!names.isEmpty());
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    // Single-key shortcuts (Space, arrows, S, N, Delete...) must not steal
+    // keys from the control the user is typing in or adjusting. Accepting a
+    // ShortcutOverride hands the key press to the focused widget instead.
+    if (event->type() == QEvent::ShortcutOverride) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        const Qt::KeyboardModifiers mods = ke->modifiers() & ~(Qt::ShiftModifier | Qt::KeypadModifier);
+        QWidget *w = qobject_cast<QWidget *>(watched);
+        if (w && w == QApplication::focusWidget() && mods == Qt::NoModifier) {
+            const int k = ke->key();
+            const bool navKey = k == Qt::Key_Left || k == Qt::Key_Right || k == Qt::Key_Up || k == Qt::Key_Down
+                || k == Qt::Key_Home || k == Qt::Key_End || k == Qt::Key_PageUp || k == Qt::Key_PageDown;
+            const bool textEntry = qobject_cast<QLineEdit *>(w) || qobject_cast<QTextEdit *>(w)
+                || qobject_cast<QPlainTextEdit *>(w) || qobject_cast<QAbstractSpinBox *>(w)
+                || qobject_cast<QKeySequenceEdit *>(w)
+                || (qobject_cast<QComboBox *>(w) && static_cast<QComboBox *>(w)->isEditable());
+            const bool navWidget = qobject_cast<QAbstractSlider *>(w) || qobject_cast<QAbstractItemView *>(w);
+            if (textEntry || (navWidget && navKey)) {
+                event->accept();
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)

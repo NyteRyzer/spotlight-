@@ -52,6 +52,7 @@ private:
     MediaProbe *m_thumbProbe; // thumbnails for media loaded from a project file
     QHash<QString, QImage> m_thumbs;
     QSet<QString> m_thumbRequested;
+    QString m_shownSignature; // what the list currently displays
 };
 
 } // namespace spotlight

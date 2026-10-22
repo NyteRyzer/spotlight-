@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -268,6 +269,21 @@ QString Exporter::findTool(const QString &name)
                                                 QStringLiteral("/snap/bin")});
 }
 
+QStringList Exporter::missingMedia(const ProjectData &d)
+{
+    QSet<QUuid> used;
+    for (const auto &t : d.tracks) {
+        for (const auto &c : t.clips)
+            used.insert(c.mediaId);
+    }
+    QStringList missing;
+    for (const auto &m : d.media) {
+        if (used.contains(m.id) && !QFileInfo::exists(m.path))
+            missing << m.name;
+    }
+    return missing;
+}
+
 bool Exporter::start(const ProjectData &project, const ExportPreset &preset, const QString &outputPath,
                      QString *error)
 {
@@ -281,6 +297,14 @@ bool Exporter::start(const ProjectData &project, const ExportPreset &preset, con
         if (error)
             *error = QStringLiteral("FFmpeg was not found. Install it (macOS: \"brew install ffmpeg\", "
                                     "Linux: your package manager) and try again.");
+        return false;
+    }
+    const QStringList missing = missingMedia(project);
+    if (!missing.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("Some media used on the timeline can't be found:\n\n%1\n\n"
+                                    "Use File → Relink Missing Media to locate it.")
+                         .arg(missing.join(QLatin1Char('\n')));
         return false;
     }
     const QStringList args = buildArguments(project, preset, outputPath, error);

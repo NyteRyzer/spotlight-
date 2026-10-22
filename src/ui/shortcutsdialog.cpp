@@ -58,7 +58,7 @@ void ShortcutsDialog::populate()
         for (int c = 0; c < 2; ++c)
             m_table->item(i, c)->setFlags(Qt::ItemIsEnabled);
         auto *edit = new QKeySequenceEdit(sm->key(d.id), m_table);
-        connect(edit, &QKeySequenceEdit::editingFinished, this, [this, edit, id = d.id] {
+        connect(edit, &QKeySequenceEdit::editingFinished, this, [edit, id = d.id] {
             auto *mgr = ShortcutManager::instance();
             const QKeySequence k = edit->keySequence();
             const QStringList clash = mgr->conflicts(id, k);

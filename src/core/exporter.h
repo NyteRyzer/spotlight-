@@ -34,6 +34,9 @@ public:
     // Shared lookup used by both (name without extension).
     static QString findTool(const QString &name);
 
+    // Media files used on the timeline that no longer exist on disk.
+    static QStringList missingMedia(const ProjectData &project);
+
     // Default file extension for a preset's container.
     static QString extensionFor(const ExportPreset &preset);
 
