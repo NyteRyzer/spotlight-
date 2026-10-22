@@ -1,6 +1,7 @@
 #include "ui/inspector.h"
 
 #include "core/project.h"
+#include "media/waveformcache.h"
 
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -48,11 +49,24 @@ ClipInspector::ClipInspector(Project *project, QWidget *parent)
     layout->addWidget(m_title);
     layout->addWidget(m_info);
 
-    m_gainDb->setRange(-60, 12);
+    m_gainDb->setRange(-60, 24);
     m_gainDb->setSuffix(QStringLiteral(" dB"));
     m_gainDb->setSingleStep(0.5);
     auto *af = new QFormLayout(m_audioBox);
     af->addRow(tr("Clip gain"), m_gainDb);
+    auto *normalizeBtn = new QPushButton(tr("Normalize (peak −1 dB)"), m_audioBox);
+    normalizeBtn->setToolTip(tr("Set the clip gain so its loudest moment peaks at −1 dB"));
+    af->addRow(normalizeBtn);
+    connect(normalizeBtn, &QPushButton::clicked, this, [this] {
+        if (!normalize()) {
+            m_pendingNormalize = m_clip;
+            m_info->setText(tr("Analyzing audio… the clip will be normalized when it's done."));
+        }
+    });
+    connect(WaveformCache::instance(), &WaveformCache::ready, this, [this] {
+        if (!m_pendingNormalize.isNull() && m_pendingNormalize == m_clip && normalize())
+            m_pendingNormalize = QUuid();
+    });
     layout->addWidget(m_audioBox);
 
     for (auto *s : {m_fadeIn, m_fadeOut}) {
@@ -127,6 +141,34 @@ void ClipInspector::refresh()
     m_contrast->setValue(int(std::lround(c->color.contrast * 100)));
     m_saturation->setValue(int(std::lround(c->color.saturation * 100)));
     m_updating = false;
+}
+
+bool ClipInspector::normalize()
+{
+    const Clip *c = m_project->data().clipById(m_clip);
+    const MediaItem *m = c ? m_project->data().mediaById(c->mediaId) : nullptr;
+    if (!c || !m || !m->hasAudio)
+        return true; // nothing to do
+    const QVector<float> *peaks = WaveformCache::instance()->peaks(m->path);
+    if (!peaks)
+        return false;
+    const qsizetype b0 = qsizetype(c->in * WaveformCache::kPeaksPerSecond / kUsPerSecond);
+    const qsizetype b1 = qsizetype(c->out * WaveformCache::kPeaksPerSecond / kUsPerSecond);
+    float peak = 0;
+    for (qsizetype b = std::max<qsizetype>(0, b0); b < std::min(b1 + 1, peaks->size()); ++b)
+        peak = std::max(peak, (*peaks)[b]);
+    if (peak <= 0.0001f) {
+        m_info->setText(tr("This clip is silent — nothing to normalize."));
+        return true;
+    }
+    const double target = std::pow(10.0, -1.0 / 20.0); // -1 dBFS
+    const double gain = std::clamp(target / peak, 0.0, std::pow(10.0, 24.0 / 20.0));
+    const QUuid id = m_clip;
+    m_project->edit(tr("Normalize Clip"), [&](ProjectData &d) {
+        if (Clip *cl = d.clipById(id))
+            cl->gain = gain;
+    });
+    return true;
 }
 
 void ClipInspector::apply(const QString &what)

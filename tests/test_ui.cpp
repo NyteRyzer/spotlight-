@@ -5,9 +5,13 @@
 #include "ui/designstudio.h"
 #include "ui/mainwindow.h"
 #include "ui/mediabin.h"
+#include "media/timelineplayer.h"
+#include "ui/programmonitor.h"
 #include "ui/theme.h"
+#include "ui/timelinewidget.h"
 #include "ui/videostudio.h"
 
+#include <QAction>
 #include <QDockWidget>
 #include <QtTest>
 
@@ -89,6 +93,50 @@ private slots:
         QMetaObject::invokeMethod(video, "captureFrame", Q_ARG(QImage, frame));
         QCOMPARE(project->data().design.layers.size(), 2);
         QCOMPARE(project->data().design.layers.first().type, LayerType::Image);
+
+        // Templates keep image layers and add their own text/shape layers.
+        design->applyTemplate(0);
+        QCOMPARE(project->data().design.layers.first().type, LayerType::Image);
+        QVERIFY(project->data().design.layers.size() >= 4);
+        int images = 0;
+        for (const auto &l : project->data().design.layers)
+            images += l.type == LayerType::Image ? 1 : 0;
+        QCOMPARE(images, 1);
+
+        // The finished design can be placed on the timeline as a graphic.
+        const int mediaBefore = project->data().media.size();
+        emit design->placeOnTimelineRequested();
+        QCOMPARE(project->data().media.size(), mediaBefore + 1);
+        QVERIFY(project->data().media.last().isStill());
+        QVERIFY(QFileInfo::exists(project->data().media.last().path));
+
+        // Menu actions by their shortcut-registry ids.
+        auto trigger = [&](const QString &text) {
+            for (QAction *a : w.findChildren<QAction *>()) {
+                if (a->text().remove('&') == text) {
+                    a->trigger();
+                    return true;
+                }
+            }
+            return false;
+        };
+        w.setWorkspace(MainWindow::Video);
+        QVERIFY(trigger("Add / Remove Marker"));
+        QCOMPARE(project->data().markers.size(), 1);
+        QVERIFY(trigger("Show Guides"));
+
+        // Copy / paste / duplicate the selected clip(s) on the timeline.
+        auto *timelineWidget = video->timeline();
+        const int clipsBefore = project->data().tracks[1].clips.size() + project->data().tracks[0].clips.size();
+        QVERIFY(!timelineWidget->selection().isEmpty()); // the placed design is selected
+        QVERIFY(trigger("Duplicate"));
+        const int clipsAfter = project->data().tracks[1].clips.size() + project->data().tracks[0].clips.size();
+        QCOMPARE(clipsAfter, clipsBefore + 1);
+        QVERIFY(trigger("Copy"));
+        // Paste is an overwrite edit at the playhead; paste into empty space.
+        video->programMonitor()->player()->seek(project->data().duration());
+        QVERIFY(trigger("Paste"));
+        QVERIFY(project->data().tracks[1].clips.size() + project->data().tracks[0].clips.size() > clipsAfter);
 
         const QString shots = qEnvironmentVariable("SPOTLIGHT_SCREENSHOT_DIR");
         for (int i = 0; i < 3; ++i) {

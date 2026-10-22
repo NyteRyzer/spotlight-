@@ -81,6 +81,31 @@ void DesignCanvas::paintEvent(QPaintEvent *)
     m_renderer.render(p, doc());
     p.restore();
 
+    if (m_guides) {
+        const double cw = doc().canvasSize.width();
+        const double ch = doc().canvasSize.height();
+        p.save();
+        p.setTransform(vt);
+        QPen thirds(QColor(255, 255, 255, 110), 0, Qt::DashLine);
+        p.setPen(thirds);
+        for (int i = 1; i < 3; ++i) {
+            p.drawLine(QLineF(cw * i / 3, 0, cw * i / 3, ch));
+            p.drawLine(QLineF(0, ch * i / 3, cw, ch * i / 3));
+        }
+        p.setPen(QPen(QColor(255, 196, 0, 120), 0, Qt::DotLine));
+        p.drawLine(QLineF(cw / 2, 0, cw / 2, ch));
+        p.drawLine(QLineF(0, ch / 2, cw, ch / 2));
+        // YouTube overlays the video length in the bottom-right corner of
+        // thumbnails; keep important content out of that box.
+        const QRectF stamp(cw * 0.84, ch * 0.86, cw * 0.14, ch * 0.10);
+        p.fillRect(stamp, QColor(230, 40, 50, 70));
+        p.setPen(QPen(QColor(230, 40, 50, 200), 0));
+        p.drawRect(stamp);
+        p.restore();
+        p.setPen(QColor(255, 200, 200));
+        p.drawText(vt.mapRect(stamp), Qt::AlignCenter, tr("timestamp"));
+    }
+
     // Selection outline + scale handle.
     if (const DesignLayer *l = doc().layer(m_selected)) {
         const QPolygonF poly = vt.map(m_renderer.canvasPolygon(*l));

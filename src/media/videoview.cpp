@@ -111,6 +111,25 @@ void VideoView::paintEvent(QPaintEvent *)
         p.setPen(QColor(140, 140, 150));
         p.drawText(canvas, Qt::AlignCenter | Qt::TextWordWrap, m_placeholder);
     }
+
+    if (m_guides) {
+        p.setPen(QPen(QColor(255, 255, 255, 90), 1, Qt::DashLine));
+        for (int i = 1; i < 3; ++i) {
+            const int x = canvas.left() + canvas.width() * i / 3;
+            const int y = canvas.top() + canvas.height() * i / 3;
+            p.drawLine(x, canvas.top(), x, canvas.bottom());
+            p.drawLine(canvas.left(), y, canvas.right(), y);
+        }
+        auto inset = [&](double f) {
+            const int dx = int(canvas.width() * (1 - f) / 2);
+            const int dy = int(canvas.height() * (1 - f) / 2);
+            return canvas.adjusted(dx, dy, -dx, -dy);
+        };
+        p.setPen(QPen(QColor(255, 196, 0, 150), 1));
+        p.drawRect(inset(0.95)); // action safe
+        p.setPen(QPen(QColor(255, 196, 0, 150), 1, Qt::DashLine));
+        p.drawRect(inset(0.90)); // title safe
+    }
 }
 
 } // namespace spotlight

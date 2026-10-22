@@ -41,6 +41,7 @@ private:
     QDoubleSpinBox *m_fps;
     QSpinBox *m_crf;
     QSpinBox *m_audioKbps;
+    QComboBox *m_loudness;
     QLineEdit *m_path;
     QProgressBar *m_progress;
     QLabel *m_info;

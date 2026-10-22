@@ -86,11 +86,23 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     tb->addWidget(shapeBtn);
     tb->addAction(tr("Use Video Frame"), this, &DesignStudio::requestVideoFrame)
         ->setToolTip(tr("Grab the current Program Monitor frame as a new layer"));
+    auto *templateBtn = new QToolButton(this);
+    templateBtn->setText(tr("Templates"));
+    templateBtn->setToolTip(tr("Start from a ready-made thumbnail layout (keeps your images)"));
+    templateBtn->setPopupMode(QToolButton::InstantPopup);
+    auto *templateMenu = new QMenu(templateBtn);
+    const QStringList names = templateNames();
+    for (int i = 0; i < names.size(); ++i)
+        templateMenu->addAction(names[i], this, [this, i] { applyTemplate(i); });
+    templateBtn->setMenu(templateMenu);
+    tb->addWidget(templateBtn);
     tb->addSeparator();
     tb->addAction(QStringLiteral("▲"), this, [this] { moveSelected(1); })->setToolTip(tr("Bring forward"));
     tb->addAction(QStringLiteral("▼"), this, [this] { moveSelected(-1); })->setToolTip(tr("Send backward"));
     tb->addAction(tr("Delete"), this, &DesignStudio::deleteSelected);
     tb->addSeparator();
+    tb->addAction(tr("To Timeline"), this, &DesignStudio::placeOnTimelineRequested)
+        ->setToolTip(tr("Place this graphic on the top video track at the playhead (intro, end card, overlay)"));
     auto *exportAct = tb->addAction(tr("Export Image…"), this, &DesignStudio::exportImage);
     exportAct->setToolTip(tr("Save the design as PNG or JPEG"));
     addToolBar(Qt::TopToolBarArea, tb);
@@ -223,6 +235,15 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     shapeForm->addRow(tr("Fill"), colorButton(QStringLiteral("fillColor"), [](const DesignLayer &l) { return l.fillColor; },
                                               [](DesignLayer &l, const QColor &c) { l.fillColor = c; }));
     shapeForm->addRow(tr("Corner radius"), m_radius);
+    m_gradient = new QCheckBox(tr("Gradient fill"), shapePage);
+    m_gradientAngle = new QDoubleSpinBox(shapePage);
+    m_gradientAngle->setRange(-360, 360);
+    m_gradientAngle->setSuffix(QStringLiteral("°"));
+    shapeForm->addRow(QString(), m_gradient);
+    shapeForm->addRow(tr("Second color"),
+                      colorButton(QStringLiteral("fillColor2"), [](const DesignLayer &l) { return l.fillColor2; },
+                                  [](DesignLayer &l, const QColor &c) { l.fillColor2 = c; }));
+    shapeForm->addRow(tr("Angle"), m_gradientAngle);
     m_typePages->addWidget(shapePage);
     pl->addWidget(m_typePages);
     pl->addStretch();
@@ -290,6 +311,11 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
             [this](int v) { editLayer(QStringLiteral("h"), [v](DesignLayer &l) { l.shapeSize.setHeight(v); }); });
     connect(m_radius, &QDoubleSpinBox::valueChanged, this,
             [this](double v) { editLayer(QStringLiteral("radius"), [v](DesignLayer &l) { l.cornerRadius = v; }); });
+    connect(m_gradient, &QCheckBox::toggled, this,
+            [this](bool v) { editLayer(QString(), [v](DesignLayer &l) { l.gradient = v; }); });
+    connect(m_gradientAngle, &QDoubleSpinBox::valueChanged, this, [this](double v) {
+        editLayer(QStringLiteral("gradientAngle"), [v](DesignLayer &l) { l.gradientAngle = v; });
+    });
 
     connect(m_canvas, &DesignCanvas::selectionChanged, this, [this] {
         rebuildLayers();
@@ -425,6 +451,8 @@ void DesignStudio::refreshProperties()
         m_shapeW->setValue(l->shapeSize.width());
         m_shapeH->setValue(l->shapeSize.height());
         m_radius->setValue(l->cornerRadius);
+        m_gradient->setChecked(l->gradient);
+        m_gradientAngle->setValue(l->gradientAngle);
         break;
     }
     for (const auto &r : m_colorRefreshers)
@@ -568,6 +596,130 @@ void DesignStudio::exportImage()
         emit status(tr("Exported %1 (%2×%3)").arg(QFileInfo(path).fileName()).arg(img.width()).arg(img.height()));
     else
         emit status(tr("Could not write %1").arg(path));
+}
+
+QStringList DesignStudio::templateNames()
+{
+    return {tr("Bold Reaction"), tr("Tutorial / How-To"), tr("Podcast Episode"), tr("Versus / Comparison")};
+}
+
+bool DesignStudio::copySelectedLayer(DesignLayer *out) const
+{
+    const DesignLayer *l = m_project->data().design.layer(m_canvas->selectedLayer());
+    if (!l)
+        return false;
+    *out = *l;
+    return true;
+}
+
+void DesignStudio::pasteLayer(const DesignLayer &layer)
+{
+    DesignLayer copy = layer;
+    copy.id = QUuid::createUuid();
+    copy.position += QPointF(24, 24);
+    m_project->edit(tr("Paste Layer"), [&](ProjectData &d) { d.design.layers.append(copy); });
+    m_canvas->setSelectedLayer(copy.id);
+}
+
+QImage DesignStudio::renderImage()
+{
+    return m_canvas->renderer()->renderToImage(m_project->data().design);
+}
+
+void DesignStudio::setGuidesVisible(bool visible)
+{
+    m_canvas->setGuidesVisible(visible);
+}
+
+void DesignStudio::applyTemplate(int index)
+{
+    const QSize canvas = m_project->data().design.canvasSize;
+    const double W = canvas.width();
+    const double H = canvas.height();
+    const double k = std::min(W / 1280.0, H / 720.0); // templates are drawn for 1280x720
+    DesignRenderer *renderer = m_canvas->renderer();
+
+    QVector<DesignLayer> layers;
+    auto shape = [&](const QString &name, QRectF r, QColor c1, QColor c2, double angle, double radius = 0,
+                     ShapeKind kind = ShapeKind::Rectangle) {
+        DesignLayer l;
+        l.id = QUuid::createUuid();
+        l.type = LayerType::Shape;
+        l.name = name;
+        l.shape = kind;
+        l.shapeSize = r.size().toSize();
+        l.position = r.topLeft();
+        l.fillColor = c1;
+        l.fillColor2 = c2;
+        l.gradient = c1 != c2;
+        l.gradientAngle = angle;
+        l.cornerRadius = radius;
+        layers.append(l);
+    };
+    // anchor: 0 = left edge at x, 1 = centred on x, 2 = right edge at x
+    auto text = [&](const QString &t, int px, QColor fill, QColor outline, double x, double y, int anchor,
+                    bool shadow = true, double outlineW = -1) {
+        DesignLayer l;
+        l.id = QUuid::createUuid();
+        l.type = LayerType::Text;
+        l.text = t;
+        l.name = t.section(QLatin1Char('\n'), 0, 0).left(40);
+        l.fontSize = int(px * k);
+        l.bold = true;
+        l.textColor = fill;
+        l.outlineColor = outline;
+        l.outlineWidth = outlineW >= 0 ? outlineW * k : std::max(2.0, l.fontSize / 14.0);
+        l.shadow = shadow;
+        const QRectF r = renderer->localRect(l);
+        const double left = anchor == 0 ? x : anchor == 1 ? x - r.width() / 2 : x - r.width();
+        l.position = QPointF(left, y);
+        layers.append(l);
+    };
+
+    const QColor gold(255, 196, 0), black(0, 0, 0), white(255, 255, 255);
+    switch (index) {
+    case 0: // Bold Reaction: darkened right side, huge punchy headline, badge.
+        shape(tr("Shade"), QRectF(0, 0, W, H), QColor(0, 0, 0, 0), QColor(0, 0, 0, 215), 0);
+        text(tr("NO WAY!"), 150, gold, black, W - 48 * k, H * 0.26, 2);
+        text(tr("I tried it for 30 days"), 52, white, black, W - 52 * k, H * 0.60, 2);
+        shape(tr("Badge"), QRectF(36 * k, 36 * k, 170 * k, 64 * k), QColor(230, 40, 50), QColor(230, 40, 50), 0, 14 * k);
+        text(tr("NEW"), 44, white, black, 36 * k + 85 * k, 40 * k, 1, false, 0);
+        break;
+    case 1: // Tutorial: colour panel on the left with a two-line title.
+        shape(tr("Panel"), QRectF(0, 0, W * 0.56, H), QColor(40, 90, 230, 235), QColor(130, 50, 220, 235), 90);
+        text(tr("HOW TO EDIT\nLIKE A PRO"), 92, white, QColor(20, 20, 60), 56 * k, H * 0.22, 0);
+        shape(tr("Pill"), QRectF(56 * k, H * 0.72, 330 * k, 66 * k), gold, gold, 0, 33 * k);
+        text(tr("STEP BY STEP"), 40, QColor(20, 20, 24), QColor(20, 20, 24), 56 * k + 165 * k, H * 0.72 + 8 * k, 1,
+             false, 0);
+        break;
+    case 2: // Podcast Episode: warm diagonal wash, episode number, guest line.
+        shape(tr("Wash"), QRectF(0, 0, W, H), QColor(40, 10, 70, 225), QColor(240, 110, 40, 200), 45);
+        shape(tr("Ring"), QRectF(W - 300 * k, -80 * k, 380 * k, 380 * k), QColor(255, 255, 255, 40),
+              QColor(255, 255, 255, 40), 0, 0, ShapeKind::Ellipse);
+        text(tr("EPISODE 42"), 120, white, QColor(40, 10, 70), 60 * k, H * 0.30, 0);
+        text(tr("with a very special guest"), 46, gold, QColor(40, 10, 70), 64 * k, H * 0.58, 0);
+        break;
+    default: // Versus: split screen with a central VS badge.
+        shape(tr("Left"), QRectF(0, 0, W / 2, H), QColor(30, 120, 255, 120), QColor(30, 120, 255, 30), 0);
+        shape(tr("Right"), QRectF(W / 2, 0, W / 2, H), QColor(255, 50, 70, 30), QColor(255, 50, 70, 120), 0);
+        shape(tr("VS badge"), QRectF(W / 2 - 95 * k, H / 2 - 95 * k, 190 * k, 190 * k), gold, QColor(255, 140, 0), 90, 0,
+              ShapeKind::Ellipse);
+        text(tr("VS"), 110, white, black, W / 2, H / 2 - 70 * k, 1);
+        text(tr("OLD"), 90, white, black, W * 0.22, H * 0.70, 1);
+        text(tr("NEW"), 90, white, black, W * 0.78, H * 0.70, 1);
+        break;
+    }
+
+    m_project->edit(tr("Apply Template"), [&](ProjectData &d) {
+        QVector<DesignLayer> kept;
+        for (const auto &l : d.design.layers) {
+            if (l.type == LayerType::Image)
+                kept.append(l);
+        }
+        d.design.layers = kept + layers;
+    });
+    m_canvas->setSelectedLayer(QUuid());
+    emit status(tr("Applied the \"%1\" template — double-click any text to edit it").arg(templateNames().value(index)));
 }
 
 } // namespace spotlight

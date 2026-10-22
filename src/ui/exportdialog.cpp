@@ -33,6 +33,7 @@ ExportDialog::ExportDialog(Project *project, QWidget *parent)
     , m_fps(new QDoubleSpinBox(this))
     , m_crf(new QSpinBox(this))
     , m_audioKbps(new QSpinBox(this))
+    , m_loudness(new QComboBox(this))
     , m_path(new QLineEdit(this))
     , m_progress(new QProgressBar(this))
     , m_info(new QLabel(this))
@@ -65,6 +66,13 @@ ExportDialog::ExportDialog(Project *project, QWidget *parent)
     form->addRow(tr("Frame rate"), m_fps);
     form->addRow(tr("Quality (CRF)"), m_crf);
     form->addRow(tr("Audio bitrate"), m_audioKbps);
+    m_loudness->addItem(tr("Off (keep levels as mixed)"), 0.0);
+    m_loudness->addItem(tr("YouTube / TikTok / Instagram  (−14 LUFS)"), -14.0);
+    m_loudness->addItem(tr("Podcast / Spotify  (−16 LUFS)"), -16.0);
+    m_loudness->addItem(tr("Broadcast TV  (−23 LUFS)"), -23.0);
+    m_loudness->setToolTip(tr("Normalize the final mix to the loudness the platform plays at, "
+                              "so your video isn't quieter or louder than everything else."));
+    form->addRow(tr("Loudness"), m_loudness);
 
     auto *pathRow = new QHBoxLayout;
     pathRow->addWidget(m_path, 1);
@@ -150,6 +158,12 @@ void ExportDialog::applyPreset(int index)
     m_fps->setValue(p.frameRate);
     m_crf->setValue(p.crf);
     m_audioKbps->setValue(p.audioBitrateKbps);
+    int li = 0;
+    for (int i = 0; i < m_loudness->count(); ++i) {
+        if (qFuzzyCompare(1 + m_loudness->itemData(i).toDouble(), 1 + p.loudnessLufs))
+            li = i;
+    }
+    m_loudness->setCurrentIndex(li);
     // Swap the extension to match the container.
     QFileInfo fi(m_path->text());
     if (!m_path->text().isEmpty())
@@ -165,6 +179,7 @@ ExportPreset ExportDialog::currentSettings() const
     p.frameRate = m_fps->value();
     p.crf = m_crf->value();
     p.audioBitrateKbps = m_audioKbps->value();
+    p.loudnessLufs = m_loudness->currentData().toDouble();
     return p;
 }
 

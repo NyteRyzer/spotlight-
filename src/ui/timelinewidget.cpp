@@ -261,7 +261,10 @@ TimeUs TimelineWidget::snap(TimeUs t, const QSet<QUuid> &exclude) const
     if (!m_snapping)
         return t;
     const TimeUs threshold = secondsToUs(kSnapPixels / m_pxPerSecond);
-    return timeline::snapTime(m_project->data(), t, threshold, exclude, {m_playhead});
+    QVector<TimeUs> points{m_playhead};
+    for (const Marker &m : m_project->data().markers)
+        points.append(m.time);
+    return timeline::snapTime(m_project->data(), t, threshold, exclude, points);
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +298,14 @@ void TimelineWidget::paintEvent(QPaintEvent *)
     p.restore();
 
     paintRuler(p);
+
+    // Marker guide lines through the lanes.
+    p.setPen(QPen(QColor(255, 196, 0, 70), 1, Qt::DashLine));
+    for (const Marker &m : shown().markers) {
+        const int x = xForTime(m.time);
+        if (x >= kHeaderWidth && x <= width() - m_vbar->width())
+            p.drawLine(x, kRulerHeight, x, height() - m_hbar->height());
+    }
 
     // Playhead.
     const int px = xForTime(m_playhead);
@@ -341,6 +352,29 @@ void TimelineWidget::paintRuler(QPainter &p)
         p.setPen(theme::textDim);
         p.drawText(x + 3, 13, formatDuration(secondsToUs(s)));
     }
+
+    // Markers: a gold flag on the ruler with the marker's name.
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    for (const Marker &m : shown().markers) {
+        const int x = xForTime(m.time);
+        if (x < kHeaderWidth - 6 || x > width())
+            continue;
+        QPainterPath flag;
+        flag.moveTo(x, kRulerHeight - 1);
+        flag.lineTo(x - 5, kRulerHeight - 8);
+        flag.lineTo(x - 5, kRulerHeight - 15);
+        flag.lineTo(x + 5, kRulerHeight - 15);
+        flag.lineTo(x + 5, kRulerHeight - 8);
+        flag.closeSubpath();
+        p.fillPath(flag, theme::accent);
+        p.setPen(theme::accent);
+        QFont mf = p.font();
+        mf.setBold(true);
+        p.setFont(mf);
+        p.drawText(x + 8, kRulerHeight - 5, m.name);
+    }
+    p.restore();
 }
 
 QVector<QPair<QRect, TimelineWidget::HeaderButton>> TimelineWidget::headerButtons(const Row &row) const

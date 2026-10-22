@@ -29,6 +29,12 @@ public:
     void showBlack();
     void setAdjust(const ColorAdjust &adjust, double fadeLevel);
     void setPlaceholderText(const QString &text);
+    // Rule-of-thirds plus title-safe (90%) and action-safe (95%) frames.
+    void setGuidesVisible(bool on)
+    {
+        m_guides = on;
+        update();
+    }
 
     // Last displayed frame at source resolution (null if nothing shown).
     QImage currentFrame() const { return m_frame; }
@@ -52,6 +58,7 @@ private:
     ColorAdjust m_adjust;
     double m_fade = 1.0;
     QString m_placeholder;
+    bool m_guides = false;
 };
 
 } // namespace spotlight

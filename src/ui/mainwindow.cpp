@@ -100,6 +100,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_video, &VideoStudio::status, this, [this](const QString &m) { statusBar()->showMessage(m, 6000); });
     connect(m_design, &DesignStudio::status, this, [this](const QString &m) { statusBar()->showMessage(m, 6000); });
     connect(m_video, &VideoStudio::captureFrame, this, &MainWindow::captureFrame);
+    connect(m_design, &DesignStudio::placeOnTimelineRequested, this, &MainWindow::placeDesignOnTimeline);
+
     connect(m_design, &DesignStudio::requestVideoFrame, this, [this] {
         const QImage f = m_video->programMonitor()->view()->currentFrame();
         if (f.isNull())
@@ -175,6 +177,14 @@ void MainWindow::buildMenus()
     file->addAction(importAct);
     file->addAction(exportAct);
     file->addAction(exportImgAct);
+    auto *exportFrameAct = makeAction(this, QStringLiteral("file.exportframe"), F, tr("Export &Frame as Image..."),
+                                      QKeySequence(tr("Ctrl+Shift+E")));
+    connect(exportFrameAct, &QAction::triggered, this, &MainWindow::exportFrame);
+    file->addAction(exportFrameAct);
+    file->addSeparator();
+    auto *relinkAct = makeAction(this, QStringLiteral("file.relink"), F, tr("Re&link Missing Media..."));
+    connect(relinkAct, &QAction::triggered, this, &MainWindow::relinkMedia);
+    file->addAction(relinkAct);
     file->addSeparator();
     file->addAction(settingsAct);
     file->addSeparator();
@@ -219,6 +229,16 @@ void MainWindow::buildMenus()
     edit->addAction(del);
     edit->addAction(ripple);
     edit->addAction(selAll);
+    edit->addSeparator();
+    auto *copyAct = makeAction(this, QStringLiteral("edit.copy"), E, tr("&Copy"), QKeySequence::Copy);
+    auto *pasteAct = makeAction(this, QStringLiteral("edit.paste"), E, tr("&Paste"), QKeySequence::Paste);
+    auto *dupAct = makeAction(this, QStringLiteral("edit.duplicate"), E, tr("D&uplicate"), QKeySequence(tr("Ctrl+D")));
+    connect(copyAct, &QAction::triggered, this, &MainWindow::copySelection);
+    connect(pasteAct, &QAction::triggered, this, &MainWindow::pasteClipboard);
+    connect(dupAct, &QAction::triggered, this, &MainWindow::duplicateSelection);
+    edit->addAction(copyAct);
+    edit->addAction(pasteAct);
+    edit->addAction(dupAct);
     edit->addSeparator();
     edit->addAction(keys);
     connect(del, &QAction::triggered, this, [this] {
@@ -283,6 +303,21 @@ void MainWindow::buildMenus()
     });
     tl->addAction(snap);
     tl->addSeparator();
+    add(QStringLiteral("timeline.marker"), tr("Add / Remove Marker"), QKeySequence(Qt::Key_M), [this, player] {
+        const TimeUs t = player->position();
+        const TimeUs frame = TimeUs(kUsPerSecond / std::max(1.0, m_project->data().sequence.frameRate));
+        bool added = false;
+        m_project->edit(tr("Marker"), [&](ProjectData &d) { added = timeline::toggleMarker(d, t, frame); });
+        statusBar()->showMessage(added ? tr("Marker added at %1").arg(formatTimecode(t, m_project->data().sequence.frameRate))
+                                       : tr("Marker removed"),
+                                 3000);
+    });
+    add(QStringLiteral("timeline.nextmarker"), tr("Next Marker"), QKeySequence(tr("Shift+M")), [this] { jumpToMarker(true); });
+    add(QStringLiteral("timeline.prevmarker"), tr("Previous Marker"), QKeySequence(tr("Alt+M")), [this] { jumpToMarker(false); });
+    add(QStringLiteral("timeline.clearmarkers"), tr("Clear All Markers"), QKeySequence(), [this] {
+        m_project->edit(tr("Clear Markers"), [](ProjectData &d) { d.markers.clear(); });
+    });
+    tl->addSeparator();
     add(QStringLiteral("timeline.addvideotrack"), tr("Add Video Track"), QKeySequence(), [this] {
         m_project->edit(tr("Add Track"), [](ProjectData &d) { d.addTrack(TrackType::Video); });
     });
@@ -305,7 +340,7 @@ void MainWindow::buildMenus()
     addD(QStringLiteral("design.image"), tr("Add Image..."), QKeySequence(), [this] { m_design->addImageDialog(); });
     addD(QStringLiteral("design.rect"), tr("Add Rectangle"), QKeySequence(), [this] { m_design->addShape(ShapeKind::Rectangle); });
     addD(QStringLiteral("design.ellipse"), tr("Add Ellipse"), QKeySequence(), [this] { m_design->addShape(ShapeKind::Ellipse); });
-    addD(QStringLiteral("design.duplicate"), tr("Duplicate Layer"), QKeySequence(tr("Ctrl+D")),
+    addD(QStringLiteral("design.duplicate"), tr("Duplicate Layer"), QKeySequence(),
          [this] { m_design->duplicateSelected(); });
     addD(QStringLiteral("design.forward"), tr("Bring Forward"), QKeySequence(tr("Ctrl+]")), [this] { m_design->moveSelected(1); });
     addD(QStringLiteral("design.backward"), tr("Send Backward"), QKeySequence(tr("Ctrl+[")),
@@ -315,6 +350,29 @@ void MainWindow::buildMenus()
                                QKeySequence(tr("Ctrl+Shift+F")));
     connect(capture, &QAction::triggered, m_design, &DesignStudio::requestVideoFrame);
     design->addAction(capture);
+    auto *toTimeline = makeAction(this, QStringLiteral("design.totimeline"), D, tr("Place Design on Timeline"),
+                                  QKeySequence(tr("Ctrl+Shift+T")));
+    connect(toTimeline, &QAction::triggered, this, &MainWindow::placeDesignOnTimeline);
+    design->addAction(toTimeline);
+    QMenu *templates = design->addMenu(tr("Templates"));
+    const QStringList templateNames = DesignStudio::templateNames();
+    for (int i = 0; i < templateNames.size(); ++i) {
+        templates->addAction(templateNames[i], this, [this, i] {
+            setWorkspace(Design);
+            m_design->applyTemplate(i);
+        });
+    }
+
+    // ---- View ----
+    QMenu *view = menuBar()->addMenu(tr("&View"));
+    auto *guides = makeAction(this, QStringLiteral("view.guides"), tr("View"), tr("Show Guides"), QKeySequence(Qt::Key_G));
+    guides->setCheckable(true);
+    guides->setToolTip(tr("Rule-of-thirds, safe areas and the YouTube timestamp zone"));
+    connect(guides, &QAction::toggled, this, [this](bool on) {
+        m_design->setGuidesVisible(on);
+        m_video->programMonitor()->view()->setGuidesVisible(on);
+    });
+    view->addAction(guides);
 
     // ---- Window ----
     QMenu *win = menuBar()->addMenu(tr("&Window"));
@@ -505,14 +563,7 @@ void MainWindow::captureFrame(const QImage &frame)
 {
     // Captures live next to the project when it has been saved, so they travel
     // with it; otherwise in the app data folder.
-    QString dir;
-    if (!m_project->filePath().isEmpty()) {
-        const QFileInfo fi(m_project->filePath());
-        dir = fi.absolutePath() + QLatin1Char('/') + fi.completeBaseName() + QStringLiteral(" Captures");
-    } else {
-        dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/captures");
-    }
-    QDir().mkpath(dir);
+    const QString dir = captureDirectory();
     const QString name = QStringLiteral("frame_%1.png").arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")));
     const QString path = dir + QLatin1Char('/') + name;
     if (!frame.save(path)) {
@@ -522,6 +573,165 @@ void MainWindow::captureFrame(const QImage &frame)
     m_design->addImageLayer(path, tr("Video frame"), true);
     setWorkspace(Design);
     statusBar()->showMessage(tr("Frame captured to %1 and added to the design").arg(path), 6000);
+}
+
+QString MainWindow::captureDirectory() const
+{
+    // Captures live next to the project when it has been saved, so they
+    // travel with it; otherwise in the app data folder.
+    QString dir;
+    if (!m_project->filePath().isEmpty()) {
+        const QFileInfo fi(m_project->filePath());
+        dir = fi.absolutePath() + QLatin1Char('/') + fi.completeBaseName() + QStringLiteral(" Captures");
+    } else {
+        dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/captures");
+    }
+    QDir().mkpath(dir);
+    return dir;
+}
+
+void MainWindow::exportFrame()
+{
+    const QImage frame = m_video->programMonitor()->view()->currentFrame();
+    if (frame.isNull()) {
+        statusBar()->showMessage(tr("Nothing in the Program Monitor to export — move the playhead over a clip."), 6000);
+        return;
+    }
+    QSettings s;
+    const QString dir = s.value(QStringLiteral("paths/designExport"),
+                                QStandardPaths::writableLocation(QStandardPaths::PicturesLocation))
+                            .toString();
+    const double fps = m_project->data().sequence.frameRate;
+    QString name = QStringLiteral("%1 %2.png")
+                       .arg(m_project->displayName(),
+                            formatTimecode(m_video->programMonitor()->player()->position(), fps).replace(':', '-'));
+    QString path = QFileDialog::getSaveFileName(this, tr("Export Frame"), QDir(dir).filePath(name),
+                                                tr("PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)"));
+    if (path.isEmpty())
+        return;
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".png");
+    s.setValue(QStringLiteral("paths/designExport"), QFileInfo(path).absolutePath());
+    const bool jpeg = path.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive)
+        || path.endsWith(QLatin1String(".jpeg"), Qt::CaseInsensitive);
+    if ((jpeg ? frame.convertToFormat(QImage::Format_RGB32) : frame).save(path, nullptr, jpeg ? 95 : -1))
+        statusBar()->showMessage(tr("Saved frame to %1 (%2×%3)").arg(path).arg(frame.width()).arg(frame.height()), 6000);
+    else
+        QMessageBox::warning(this, tr("Export Frame"), tr("Could not write %1").arg(path));
+}
+
+void MainWindow::relinkMedia()
+{
+    int missing = 0;
+    for (const auto &m : m_project->data().media)
+        missing += QFileInfo::exists(m.path) ? 0 : 1;
+    if (missing == 0) {
+        QMessageBox::information(this, tr("Relink Media"), tr("All media files in this project are where they should be."));
+        return;
+    }
+    const QString folder = QFileDialog::getExistingDirectory(
+        this, tr("Find %n missing file(s) in folder", nullptr, missing),
+        QStandardPaths::writableLocation(QStandardPaths::HomeLocation));
+    if (folder.isEmpty())
+        return;
+    int found = 0;
+    m_project->edit(tr("Relink Media"), [&](ProjectData &d) { found = timeline::relinkMissingMedia(d, folder); });
+    m_video->programMonitor()->player()->seek(m_video->programMonitor()->player()->position());
+    QMessageBox::information(this, tr("Relink Media"),
+                             tr("Relinked %1 of %2 missing file(s).").arg(found).arg(missing));
+}
+
+void MainWindow::placeDesignOnTimeline()
+{
+    const QImage img = m_design->renderImage();
+    const QString path = captureDirectory() + QStringLiteral("/design_%1.png")
+                                                  .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")));
+    if (!img.save(path)) {
+        statusBar()->showMessage(tr("Could not save the design to %1").arg(path), 6000);
+        return;
+    }
+    MediaItem item;
+    item.id = QUuid::createUuid();
+    item.path = path;
+    item.name = tr("Design %1").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")));
+    item.kind = MediaKind::Image;
+    item.resolution = img.size();
+    item.hasVideo = true;
+    const TimeUs at = m_video->programMonitor()->player()->position();
+    QUuid placed;
+    m_project->edit(tr("Place Design on Timeline"), [&](ProjectData &d) {
+        d.media.append(item);
+        const QVector<int> videos = d.videoTrackIndices();
+        placed = timeline::placeMedia(d, item.id, videos.isEmpty() ? -1 : videos.last(), at);
+    });
+    setWorkspace(Video);
+    if (!placed.isNull()) {
+        m_video->timeline()->setSelection({placed});
+        statusBar()->showMessage(tr("Design placed on the top video track at %1 — drag its edges to change how long it shows")
+                                     .arg(formatTimecode(at, m_project->data().sequence.frameRate)),
+                                 8000);
+    }
+}
+
+void MainWindow::copySelection()
+{
+    if (m_stack->currentIndex() == Design) {
+        DesignLayer l;
+        if (m_design->copySelectedLayer(&l))
+            m_layerClipboard = l;
+        return;
+    }
+    const QVector<QUuid> sel = activeTimeline()->selection();
+    if (sel.isEmpty())
+        return;
+    m_clipClipboard = timeline::copyClips(m_project->data(), sel);
+    statusBar()->showMessage(tr("Copied %n clip(s)", nullptr, int(m_clipClipboard.size())), 3000);
+}
+
+void MainWindow::pasteClipboard()
+{
+    if (m_stack->currentIndex() == Design) {
+        if (m_layerClipboard)
+            m_design->pasteLayer(*m_layerClipboard);
+        return;
+    }
+    if (m_clipClipboard.isEmpty())
+        return;
+    TimelinePlayer *player = m_video->programMonitor()->player();
+    QVector<QUuid> created;
+    m_project->edit(tr("Paste"), [&](ProjectData &d) { created = timeline::pasteClips(d, m_clipClipboard, player->position()); });
+    if (!created.isEmpty()) {
+        activeTimeline()->setSelection(created);
+        player->seek(timeline::selectionEnd(m_project->data(), created));
+    }
+}
+
+void MainWindow::duplicateSelection()
+{
+    if (m_stack->currentIndex() == Design) {
+        m_design->duplicateSelected();
+        return;
+    }
+    const QVector<QUuid> sel = activeTimeline()->selection();
+    if (sel.isEmpty())
+        return;
+    const auto entries = timeline::copyClips(m_project->data(), sel);
+    const TimeUs end = timeline::selectionEnd(m_project->data(), sel);
+    QVector<QUuid> created;
+    m_project->edit(tr("Duplicate"), [&](ProjectData &d) { created = timeline::pasteClips(d, entries, end); });
+    if (!created.isEmpty())
+        activeTimeline()->setSelection(created);
+}
+
+void MainWindow::jumpToMarker(bool next)
+{
+    TimelinePlayer *player = m_video->programMonitor()->player();
+    const TimeUs t = next ? timeline::nextMarker(m_project->data(), player->position())
+                          : timeline::previousMarker(m_project->data(), player->position());
+    if (t >= 0)
+        player->seek(t);
+    else
+        statusBar()->showMessage(next ? tr("No marker after the playhead") : tr("No marker before the playhead"), 2500);
 }
 
 void MainWindow::saveLayouts()

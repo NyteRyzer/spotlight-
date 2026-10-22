@@ -1,7 +1,12 @@
 #pragma once
 
+#include "core/design.h"
+#include "core/timelineops.h"
+
 #include <QByteArray>
 #include <QMainWindow>
+
+#include <optional>
 
 class QTabBar;
 class QStackedWidget;
@@ -46,6 +51,14 @@ private:
     void addRecent(const QString &path);
     void rebuildRecentMenu();
     void captureFrame(const QImage &frame);
+    QString captureDirectory() const;
+    void exportFrame();
+    void relinkMedia();
+    void placeDesignOnTimeline();
+    void copySelection();
+    void pasteClipboard();
+    void duplicateSelection();
+    void jumpToMarker(bool next);
     TimelineWidget *activeTimeline() const;
 
     QMainWindow *studio(int index) const;
@@ -65,6 +78,8 @@ private:
     QMenu *m_layoutMenu = nullptr;
     QLabel *m_autosaveLabel;
     QByteArray m_defaultLayouts[3];
+    QVector<timeline::ClipboardEntry> m_clipClipboard;
+    std::optional<DesignLayer> m_layerClipboard;
 };
 
 } // namespace spotlight

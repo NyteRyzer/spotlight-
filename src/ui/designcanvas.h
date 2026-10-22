@@ -20,6 +20,12 @@ public:
     QUuid selectedLayer() const { return m_selected; }
     void setSelectedLayer(const QUuid &id);
     DesignRenderer *renderer() { return &m_renderer; }
+    // Rule-of-thirds lines, centre lines and the YouTube timestamp zone.
+    void setGuidesVisible(bool on)
+    {
+        m_guides = on;
+        update();
+    }
 
 signals:
     void selectionChanged(const QUuid &layerId);
@@ -50,6 +56,7 @@ private:
     QPointF m_pressCanvas;
     DesignLayer m_orig;
     bool m_previewActive = false;
+    bool m_guides = false;
     DesignDocument m_preview;
 };
 

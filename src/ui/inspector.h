@@ -24,6 +24,9 @@ public slots:
 private:
     void refresh();
     void apply(const QString &what);
+    // Sets clip gain so the loudest peak in the clip reaches -1 dBFS.
+    // Returns false if the waveform is still being analysed.
+    bool normalize();
 
     Project *m_project;
     QUuid m_clip;
@@ -39,6 +42,7 @@ private:
     QSlider *m_contrast;
     QSlider *m_saturation;
     bool m_updating = false;
+    QUuid m_pendingNormalize; // clip waiting for waveform analysis
 };
 
 } // namespace spotlight

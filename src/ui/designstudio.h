@@ -38,9 +38,22 @@ public slots:
     void moveSelected(int delta); // +1 = forward, -1 = backward
     void duplicateSelected();
     void exportImage();
+    // Replaces text/shape layers with a ready-made thumbnail layout; image
+    // layers (e.g. a captured video frame) are kept underneath.
+    void applyTemplate(int index);
+    void setGuidesVisible(bool visible);
+
+public:
+    static QStringList templateNames();
+    // The design rendered at full canvas resolution.
+    QImage renderImage();
+    // Layer clipboard support (Edit → Copy / Paste in the Design Studio).
+    bool copySelectedLayer(DesignLayer *out) const;
+    void pasteLayer(const DesignLayer &layer);
 
 signals:
     void requestVideoFrame();
+    void placeOnTimelineRequested();
     void status(const QString &message);
 
 private:
@@ -76,6 +89,8 @@ private:
     QSpinBox *m_shapeW;
     QSpinBox *m_shapeH;
     QDoubleSpinBox *m_radius;
+    QCheckBox *m_gradient;
+    QDoubleSpinBox *m_gradientAngle;
     QVector<std::function<void()>> m_colorRefreshers;
     bool m_updating = false;
 };
