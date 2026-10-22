@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
     // resources.qrc lives in the static spotlight_ui library; static-library
     // resources are only registered when initialised explicitly.
     Q_INIT_RESOURCE(resources);
-    app.setWindowIcon(QIcon(QStringLiteral(":/icons/spotlight.svg")));
+    app.setWindowIcon(QIcon(QStringLiteral(":/icons/spotlight.png")));
     spotlight::theme::apply(app);
 
     QCommandLineParser parser;

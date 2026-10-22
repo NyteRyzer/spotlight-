@@ -34,4 +34,6 @@ if(UNIX AND NOT APPLE)
             DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages)
     install(FILES ${PROJECT_SOURCE_DIR}/resources/icons/spotlight.svg
             DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+    install(FILES ${PROJECT_SOURCE_DIR}/resources/icons/spotlight.png
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps)
 endif()

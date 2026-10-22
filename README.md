@@ -88,7 +88,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(b
 cmake --build build
 open build/src/app/SPOTLIGHT.app
 ```
-Installer: `packaging/macos/build-dmg.sh` (needs `brew install librsvg` for the icon) → `build-macos/SPOTLIGHT-<ver>-macOS-arm64.dmg`,
+Installer: `packaging/macos/build-dmg.sh` → `build-macos/SPOTLIGHT-<ver>-macOS-arm64.dmg`,
 a self-contained app with Qt, ffmpeg and ffprobe bundled and an ad-hoc signature.
 
 Intel Mac installer (runs on macOS 12+): install Qt 6.8 from qt.io (or `pip install aqtinstall && aqt install-qt mac desktop 6.8.3 clang_64 -m qtmultimedia`),

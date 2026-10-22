@@ -5,7 +5,7 @@
 #     so importing and exporting work without Homebrew
 #   * ad-hoc code signature (required to run on Apple Silicon)
 #
-# Requires: Homebrew packages qt, ffmpeg, cmake, ninja (and librsvg for the icon).
+# Requires: Homebrew packages qt, ffmpeg, cmake, ninja.
 # Usage: packaging/macos/build-dmg.sh [build-dir]
 #
 # Optional environment overrides (used by the Intel build, which targets older
@@ -25,7 +25,7 @@ DEPLOY_TARGET="${DEPLOY_TARGET:-14.0}"
 VERSION="$(grep -A2 '^project(' "$ROOT/CMakeLists.txt" | grep -m1 -oE 'VERSION [0-9.]+' | cut -d' ' -f2)"
 DMG_LABEL="${DMG_LABEL:-$(uname -m)}"
 
-if [ ! -f "$ROOT/packaging/macos/spotlight.icns" ] && command -v rsvg-convert >/dev/null; then
+if [ ! -f "$ROOT/packaging/macos/spotlight.icns" ]; then
   "$ROOT/packaging/macos/make-icns.sh"
 fi
 

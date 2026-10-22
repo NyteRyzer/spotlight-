@@ -54,7 +54,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_autosaveLabel(new QLabel(this))
 {
     setObjectName(QStringLiteral("SpotlightMainWindow"));
-    setWindowIcon(QIcon(QStringLiteral(":/icons/spotlight.svg")));
+    setWindowIcon(QIcon(QStringLiteral(":/icons/spotlight.png")));
 
     m_video = new VideoStudio(m_project, m_stack);
     m_audio = new AudioStudio(m_project, m_video->programMonitor()->player(), m_video->mediaBin(), m_stack);

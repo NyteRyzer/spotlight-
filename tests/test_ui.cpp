@@ -55,7 +55,7 @@ private slots:
         auto *design = w.findChild<DesignStudio *>();
         auto *project = w.findChild<Project *>();
         QVERIFY(video && design && project);
-        QVERIFY2(QFile::exists(QStringLiteral(":/icons/spotlight.svg")), "app icon resource missing");
+        QVERIFY2(QFile::exists(QStringLiteral(":/icons/spotlight.png")), "app icon resource missing");
 
         // Import a generated clip if ffmpeg is available.
         const QString ffmpeg = Exporter::findFfmpeg();

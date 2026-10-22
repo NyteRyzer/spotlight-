@@ -39,5 +39,5 @@ export VERSION="$(grep -A2 '^project(' "$ROOT/CMakeLists.txt" | grep -m1 -oP 'VE
 export OUTPUT="SPOTLIGHT-${VERSION}-${ARCH}.AppImage"
 "$TOOLS/linuxdeploy.AppImage" --appdir "$APPDIR" --plugin qt --output appimage \
   --desktop-file "$APPDIR/usr/share/applications/spotlight.desktop" \
-  --icon-file "$ROOT/resources/icons/spotlight.svg" "${EXTRA_EXES[@]}"
+  --icon-file "$ROOT/resources/icons/spotlight.png" "${EXTRA_EXES[@]}"
 ls -1 "$BUILD"/*.AppImage

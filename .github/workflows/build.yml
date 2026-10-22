@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install dependencies
-        run: brew install qt ffmpeg ninja librsvg
+        run: brew install qt ffmpeg ninja
       - name: App icon
         run: packaging/macos/make-icns.sh
       - name: Configure
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Install build tools
         run: |
-          brew install ninja librsvg
+          brew install ninja
           python3 -m pip install --break-system-packages aqtinstall
       - name: Install Qt ${{ env.QT_VERSION }}
         run: |
