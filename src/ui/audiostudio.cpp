@@ -366,8 +366,13 @@ void AudioStudio::rebuildMixer()
         return;
     }
 
-    for (auto *s : m_strips)
+    // Detach old strips right away; deleteLater alone leaves them visible
+    // until the event loop gets round to deleting them.
+    for (auto *s : m_strips) {
+        m_mixerLayout->removeWidget(s);
+        s->hide();
         s->deleteLater();
+    }
     m_strips.clear();
     for (int i = 0; i < ids.size(); ++i) {
         auto *strip = new ChannelStrip(m_project, ids[i], m_mixer);

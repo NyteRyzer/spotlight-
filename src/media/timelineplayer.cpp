@@ -8,6 +8,7 @@
 #include <QImageReader>
 #include <QMediaPlayer>
 #include <QUrl>
+#include <QVideoSink>
 
 #include <cmath>
 
@@ -24,6 +25,12 @@ TimelinePlayer::TimelinePlayer(Project *project, VideoView *view, QObject *paren
 {
     m_video = makeLane(false);
     m_video.player->setVideoSink(view->videoSink());
+    connect(view->videoSink(), &QVideoSink::videoFrameChanged, this, [this] {
+        if (m_frameRequested && !m_playing) {
+            m_frameRequested = false;
+            m_video.player->pause();
+        }
+    });
 
     m_timer.setInterval(15);
     m_timer.setTimerType(Qt::PreciseTimer);
@@ -49,7 +56,11 @@ TimelinePlayer::Lane TimelinePlayer::makeLane(bool withAudio)
     }
     // Seeking is only reliable once the media is loaded; apply it then.
     QMediaPlayer *player = lane.player;
-    connect(player, &QMediaPlayer::mediaStatusChanged, this, [this, player](QMediaPlayer::MediaStatus s) {
+    // Queued: seeking from inside the backend's own status notification is
+    // ignored by the FFmpeg backend, leaving the monitor on a stale frame.
+    connect(
+        player, &QMediaPlayer::mediaStatusChanged, this,
+        [this, player](QMediaPlayer::MediaStatus s) {
         if (s != QMediaPlayer::LoadedMedia && s != QMediaPlayer::BufferedMedia)
             return;
         Lane *l = nullptr;
@@ -61,13 +72,25 @@ TimelinePlayer::Lane TimelinePlayer::makeLane(bool withAudio)
         }
         if (!l || l->pendingSeekMs < 0)
             return;
-        player->setPosition(l->pendingSeekMs);
+        const qint64 target = l->pendingSeekMs;
         l->pendingSeekMs = -1;
+        // Leave the Stopped state before seeking: some backends ignore a
+        // seek issued while stopped, leaving a paused monitor on frame 0.
         if (m_playing)
             player->play();
         else
             player->pause();
-    });
+        player->setPosition(target);
+        if (!m_playing && player == m_video.player)
+            requestPausedFrame();
+        // Safety net: if the seek still didn't stick, retry once the
+        // pipeline has settled.
+        QTimer::singleShot(150, player, [player, target] {
+            if (std::abs(player->position() - target) > 200)
+                player->setPosition(target);
+        });
+        },
+        Qt::QueuedConnection);
     return lane;
 }
 
@@ -83,6 +106,12 @@ QImage TimelinePlayer::stillImage(const QString &path)
         m_stills.clear();
     m_stills.insert(path, img);
     return img;
+}
+
+void TimelinePlayer::requestPausedFrame()
+{
+    m_frameRequested = true;
+    m_video.player->play(); // no audio output: silent
 }
 
 void TimelinePlayer::play()
@@ -185,8 +214,13 @@ void TimelinePlayer::driveLane(Lane &lane, const QString &path, qint64 srcMs, bo
         return;
     }
     const qint64 drift = std::abs(lane.player->position() - srcMs);
-    if (forceSeek || drift > kDriftToleranceMs)
+    if (forceSeek || drift > kDriftToleranceMs) {
         lane.player->setPosition(srcMs);
+        if (!m_playing && &lane == &m_video) {
+            requestPausedFrame();
+            return;
+        }
+    }
     if (m_playing && lane.player->playbackState() != QMediaPlayer::PlayingState)
         lane.player->play();
     else if (!m_playing && lane.player->playbackState() == QMediaPlayer::PlayingState)

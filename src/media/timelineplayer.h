@@ -60,6 +60,10 @@ private:
     void stopLane(Lane &lane);
     Lane makeLane(bool withAudio);
     QImage stillImage(const QString &path);
+    // Shows the video frame at the current (paused) position. Some backends
+    // don't render after a paused seek, so play the silent video player
+    // until the first frame arrives, then pause again.
+    void requestPausedFrame();
 
     Project *m_project;
     VideoView *m_view;
@@ -70,6 +74,7 @@ private:
     TimeUs m_clockBase = 0;
     TimeUs m_pos = 0;
     bool m_playing = false;
+    bool m_frameRequested = false;
     QHash<QString, QImage> m_stills;
 };
 

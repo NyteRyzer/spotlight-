@@ -170,7 +170,9 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     m_propsTitle->setFont(tf);
     pl->addWidget(m_propsTitle);
 
-    auto *common = new QFormLayout;
+    m_commonProps = new QWidget(m_props);
+    auto *common = new QFormLayout(m_commonProps);
+    common->setContentsMargins(0, 0, 0, 0);
     m_opacity = hslider(0, 100, m_props);
     m_scale = new QDoubleSpinBox(m_props);
     m_scale->setRange(1, 5000);
@@ -181,7 +183,7 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     common->addRow(tr("Opacity"), m_opacity);
     common->addRow(tr("Scale"), m_scale);
     common->addRow(tr("Rotation"), m_rotation);
-    pl->addLayout(common);
+    pl->addWidget(m_commonProps);
 
     m_typePages = new QStackedWidget(m_props);
     // Image page
@@ -418,6 +420,7 @@ void DesignStudio::refreshProperties()
     const DesignLayer *l = m_project->data().design.layer(m_canvas->selectedLayer());
     m_props->setEnabled(l != nullptr);
     m_typePages->setVisible(l != nullptr);
+    m_commonProps->setVisible(l != nullptr);
     if (!l) {
         m_propsTitle->setText(tr("Select a layer on the canvas"));
         return;

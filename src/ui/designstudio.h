@@ -72,6 +72,7 @@ private:
     // Properties
     QWidget *m_props;
     QLabel *m_propsTitle;
+    QWidget *m_commonProps;
     QSlider *m_opacity;
     QDoubleSpinBox *m_scale;
     QDoubleSpinBox *m_rotation;

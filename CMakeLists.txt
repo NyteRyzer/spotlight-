@@ -12,6 +12,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 option(SPOTLIGHT_BUILD_TESTS "Build unit tests" ON)
+option(SPOTLIGHT_BUILD_TOOLS "Build developer tools (screenshot generator)" OFF)
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
 
@@ -29,6 +30,10 @@ add_subdirectory(src/core)
 add_subdirectory(src/media)
 add_subdirectory(src/ui)
 add_subdirectory(src/app)
+
+if(SPOTLIGHT_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
 
 if(SPOTLIGHT_BUILD_TESTS)
     enable_testing()

@@ -1,6 +1,7 @@
 #include "ui/theme.h"
 
 #include <QApplication>
+#include <QFontDatabase>
 #include <QPalette>
 #include <QStyleFactory>
 
@@ -9,6 +10,14 @@ namespace spotlight::theme {
 void apply(QApplication &app)
 {
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+#ifndef Q_OS_MACOS
+    // A crisp UI font where available (macOS keeps its own system font).
+    if (QFontDatabase::families().contains(QStringLiteral("Inter"))) {
+        QFont f(QStringLiteral("Inter"));
+        f.setPointSizeF(app.font().pointSizeF());
+        app.setFont(f);
+    }
+#endif
 
     QPalette p;
     p.setColor(QPalette::Window, QColor(24, 24, 28));
