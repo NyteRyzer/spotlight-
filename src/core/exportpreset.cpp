@@ -21,6 +21,7 @@ QJsonObject ExportPreset::toJson() const
     o["audioCodec"] = audioCodec;
     o["audioBitrate"] = audioBitrateKbps;
     o["sampleRate"] = sampleRate;
+    o["loudness"] = loudnessLufs;
     return o;
 }
 
@@ -38,6 +39,7 @@ ExportPreset ExportPreset::fromJson(const QJsonObject &o)
     p.audioCodec = o["audioCodec"].toString(p.audioCodec);
     p.audioBitrateKbps = o["audioBitrate"].toInt(p.audioBitrateKbps);
     p.sampleRate = o["sampleRate"].toInt(p.sampleRate);
+    p.loudnessLufs = o["loudness"].toDouble(0.0);
     return p;
 }
 
@@ -96,6 +98,15 @@ QVector<ExportPreset> builtInExportPresets()
     audio(QStringLiteral("Podcast / Music MP3 (320 kbps)"), QStringLiteral("mp3"), QStringLiteral("libmp3lame"), 320);
     audio(QStringLiteral("Audio AAC (M4A, 256 kbps)"), QStringLiteral("m4a"), QStringLiteral("aac"), 256);
     audio(QStringLiteral("Audio WAV (24-bit master)"), QStringLiteral("wav"), QStringLiteral("pcm_s24le"), 0);
+
+    // Platform loudness targets: YouTube/TikTok/Instagram normalize playback
+    // to about -14 LUFS; podcast apps expect about -16 LUFS.
+    for (auto &p : r) {
+        if (p.name.startsWith(QLatin1String("YouTube")) || p.name.contains(QLatin1String("Instagram")))
+            p.loudnessLufs = -14.0;
+        else if (p.name.startsWith(QLatin1String("Podcast")))
+            p.loudnessLufs = -16.0;
+    }
     return r;
 }
 

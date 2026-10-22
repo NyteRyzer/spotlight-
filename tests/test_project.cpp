@@ -37,9 +37,21 @@ private slots:
         text.textColor = QColor(255, 0, 0, 200);
         d.design.layers.append(text);
 
+        DesignLayer shape;
+        shape.id = QUuid::createUuid();
+        shape.type = LayerType::Shape;
+        shape.gradient = true;
+        shape.gradientAngle = 45;
+        d.design.layers.append(shape);
+        timeline::toggleMarker(d, 3 * S, 0, "Intro");
+
         ProjectData back;
         QString err;
         QVERIFY2(ProjectData::fromJson(d.toJson(), &back, &err), qPrintable(err));
+        QCOMPARE(back.markers.size(), 1);
+        QCOMPARE(back.markers[0].name, QStringLiteral("Intro"));
+        QVERIFY(back.design.layers[1].gradient);
+        QCOMPARE(back.design.layers[1].gradientAngle, 45.0);
         QCOMPARE(back.toJson(), d.toJson());
         QCOMPARE(back.design.layers[0].textColor, QColor(255, 0, 0, 200));
         QCOMPARE(back.clipById(id)->color.saturation, 1.5);

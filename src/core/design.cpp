@@ -73,6 +73,9 @@ QJsonObject DesignLayer::toJson() const
         o["height"] = shapeSize.height();
         o["fillColor"] = colorToString(fillColor);
         o["cornerRadius"] = cornerRadius;
+        o["gradient"] = gradient;
+        o["fillColor2"] = colorToString(fillColor2);
+        o["gradientAngle"] = gradientAngle;
         break;
     }
     return o;
@@ -107,6 +110,9 @@ DesignLayer DesignLayer::fromJson(const QJsonObject &o)
     l.shapeSize = QSize(o["width"].toInt(400), o["height"].toInt(200));
     l.fillColor = colorFromValue(o["fillColor"], QColor(255, 196, 0));
     l.cornerRadius = o["cornerRadius"].toDouble();
+    l.gradient = o["gradient"].toBool();
+    l.fillColor2 = colorFromValue(o["fillColor2"], QColor(255, 80, 60));
+    l.gradientAngle = o["gradientAngle"].toDouble(90.0);
     return l;
 }
 

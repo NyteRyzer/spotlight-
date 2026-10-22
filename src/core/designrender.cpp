@@ -6,7 +6,11 @@
 #include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QImageReader>
+#include <QLinearGradient>
 #include <QPainter>
+#include <QtMath>
+
+#include <cmath>
 
 namespace spotlight {
 
@@ -131,8 +135,20 @@ void DesignRenderer::renderLayer(QPainter &p, const DesignLayer &l)
     }
     case LayerType::Shape: {
         p.setPen(Qt::NoPen);
-        p.setBrush(l.fillColor);
         const QRectF r = localRect(l);
+        if (l.gradient) {
+            // Gradient line through the centre at gradientAngle, spanning the
+            // shape's extent in that direction.
+            const double a = qDegreesToRadians(l.gradientAngle);
+            const QPointF dir(std::cos(a), std::sin(a));
+            const double half = (std::abs(dir.x()) * r.width() + std::abs(dir.y()) * r.height()) / 2;
+            QLinearGradient g(r.center() - dir * half, r.center() + dir * half);
+            g.setColorAt(0, l.fillColor);
+            g.setColorAt(1, l.fillColor2);
+            p.setBrush(g);
+        } else {
+            p.setBrush(l.fillColor);
+        }
         if (l.shape == ShapeKind::Ellipse)
             p.drawEllipse(r);
         else

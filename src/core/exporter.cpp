@@ -192,6 +192,10 @@ QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &p
             ? trackLabels.first() + QStringLiteral("anull")
             : trackLabels.join(QString())
                 + QStringLiteral("amix=inputs=%1:duration=longest:normalize=0").arg(trackLabels.size());
+        // Loudness normalization (EBU R128) to the platform target, with a
+        // -1.5 dBTP ceiling so the encoder never clips.
+        if (preset.loudnessLufs < 0)
+            mix += QStringLiteral(",loudnorm=I=%1:TP=-1.5:LRA=11").arg(num(preset.loudnessLufs));
         g.filters << mix + QStringLiteral(",apad,atrim=duration=%1[aout]").arg(secs(total));
     }
 

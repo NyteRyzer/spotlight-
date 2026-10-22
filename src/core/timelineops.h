@@ -81,4 +81,32 @@ TimeUs snapTime(const ProjectData &d, TimeUs t, TimeUs threshold, const QSet<QUu
 // Envelope multiplier (0..1) for a clip's fades at timeline time t.
 double fadeEnvelope(const Clip &c, TimeUs t);
 
+// ---- Copy / paste -------------------------------------------------------
+// Clips captured by copyClips(), positioned relative to the earliest one.
+struct ClipboardEntry {
+    QUuid trackId;
+    int trackIndex = -1; // fallback when the track no longer exists
+    Clip clip;           // clip.start is relative to the copied range start
+};
+// Copies the clips (plus linked partners) for later pasting.
+QVector<ClipboardEntry> copyClips(const ProjectData &d, const QVector<QUuid> &clipIds);
+// Pastes clips with their relative layout starting at `at` (overwrite edit).
+// Links between pasted clips are preserved with fresh ids. Returns new ids.
+QVector<QUuid> pasteClips(ProjectData &d, const QVector<ClipboardEntry> &entries, TimeUs at);
+// End of the latest clip among clipIds (and partners); 0 if none.
+TimeUs selectionEnd(const ProjectData &d, const QVector<QUuid> &clipIds);
+
+// ---- Markers ------------------------------------------------------------
+// Adds a marker at t, or removes the one already within `tolerance` of t.
+// Returns true if a marker was added.
+bool toggleMarker(ProjectData &d, TimeUs t, TimeUs tolerance, const QString &name = QString());
+// Nearest marker strictly after / before t, or -1.
+TimeUs nextMarker(const ProjectData &d, TimeUs t);
+TimeUs previousMarker(const ProjectData &d, TimeUs t);
+
+// ---- Relinking ----------------------------------------------------------
+// Searches `folder` (recursively) for files named like missing media and
+// points those media items at them. Returns the number relinked.
+int relinkMissingMedia(ProjectData &d, const QString &folder);
+
 } // namespace spotlight::timeline

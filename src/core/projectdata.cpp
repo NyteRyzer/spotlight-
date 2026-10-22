@@ -236,6 +236,15 @@ QJsonObject ProjectData::toJson(const QString &projectDir) const
     }
     root["tracks"] = trackArr;
     root["design"] = design.toJson();
+    QJsonArray markerArr;
+    for (const auto &m : markers) {
+        QJsonObject o;
+        o["id"] = uuidStr(m.id);
+        o["time"] = double(m.time);
+        o["name"] = m.name;
+        markerArr.append(o);
+    }
+    root["markers"] = markerArr;
     return root;
 }
 
@@ -309,6 +318,11 @@ bool ProjectData::fromJson(const QJsonObject &root, ProjectData *out, QString *e
                      [](const Track &a, const Track &b) { return a.isVideo() && b.isAudio(); });
 
     d.design = DesignDocument::fromJson(root["design"].toObject());
+    for (const auto &v : root["markers"].toArray()) {
+        const QJsonObject o = v.toObject();
+        d.markers.append({uuidOrNew(o["id"]), TimeUs(o["time"].toDouble()), o["name"].toString()});
+    }
+    std::sort(d.markers.begin(), d.markers.end(), [](const Marker &a, const Marker &b) { return a.time < b.time; });
     *out = d;
     return true;
 }

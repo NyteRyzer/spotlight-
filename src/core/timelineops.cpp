@@ -1,5 +1,7 @@
 #include "core/timelineops.h"
 
+#include <QDirIterator>
+#include <QFileInfo>
 #include <QHash>
 
 #include <algorithm>
@@ -529,6 +531,131 @@ double fadeEnvelope(const Clip &c, TimeUs t)
     if (c.fadeOut > 0 && remaining < c.fadeOut)
         g = std::min(g, std::max(0.0, double(remaining) / double(c.fadeOut)));
     return g;
+}
+
+QVector<ClipboardEntry> copyClips(const ProjectData &d, const QVector<QUuid> &clipIds)
+{
+    QVector<QUuid> all;
+    for (const auto &id : clipIds) {
+        for (const auto &g : groupOf(d, id)) {
+            if (!all.contains(g))
+                all.append(g);
+        }
+    }
+    QVector<ClipboardEntry> out;
+    TimeUs origin = std::numeric_limits<TimeUs>::max();
+    for (const auto &id : all) {
+        int ti = -1;
+        if (const Clip *c = d.clipById(id, &ti)) {
+            out.append({d.tracks[ti].id, ti, *c});
+            origin = std::min(origin, c->start);
+        }
+    }
+    for (auto &e : out)
+        e.clip.start -= origin;
+    return out;
+}
+
+QVector<QUuid> pasteClips(ProjectData &d, const QVector<ClipboardEntry> &entries, TimeUs at)
+{
+    QHash<QUuid, QUuid> newLinks;
+    QVector<QUuid> created;
+    at = std::max<TimeUs>(0, at);
+    for (const auto &e : entries) {
+        if (!d.mediaById(e.clip.mediaId))
+            continue; // media was removed from the project since copying
+        int ti = d.trackIndex(e.trackId);
+        if (ti < 0)
+            ti = (e.trackIndex >= 0 && e.trackIndex < d.tracks.size()) ? e.trackIndex : -1;
+        if (ti < 0 || d.tracks[ti].locked)
+            continue;
+        Clip c = e.clip;
+        c.id = QUuid::createUuid();
+        c.start = at + e.clip.start;
+        if (!c.linkId.isNull()) {
+            if (!newLinks.contains(c.linkId))
+                newLinks.insert(c.linkId, QUuid::createUuid());
+            c.linkId = newLinks.value(c.linkId);
+        }
+        clearRange(d.tracks[ti], c.start, c.end());
+        insertSorted(d.tracks[ti], c);
+        created.append(c.id);
+    }
+    return created;
+}
+
+TimeUs selectionEnd(const ProjectData &d, const QVector<QUuid> &clipIds)
+{
+    TimeUs end = 0;
+    for (const auto &id : clipIds) {
+        for (const auto &g : groupOf(d, id)) {
+            if (const Clip *c = d.clipById(g))
+                end = std::max(end, c->end());
+        }
+    }
+    return end;
+}
+
+bool toggleMarker(ProjectData &d, TimeUs t, TimeUs tolerance, const QString &name)
+{
+    for (int i = 0; i < d.markers.size(); ++i) {
+        if (std::abs(d.markers[i].time - t) <= tolerance) {
+            d.markers.removeAt(i);
+            return false;
+        }
+    }
+    Marker m{QUuid::createUuid(), std::max<TimeUs>(0, t), name};
+    if (m.name.isEmpty())
+        m.name = QStringLiteral("Marker %1").arg(d.markers.size() + 1);
+    auto it = std::lower_bound(d.markers.begin(), d.markers.end(), m,
+                               [](const Marker &a, const Marker &b) { return a.time < b.time; });
+    d.markers.insert(it, m);
+    return true;
+}
+
+TimeUs nextMarker(const ProjectData &d, TimeUs t)
+{
+    for (const auto &m : d.markers) {
+        if (m.time > t)
+            return m.time;
+    }
+    return -1;
+}
+
+TimeUs previousMarker(const ProjectData &d, TimeUs t)
+{
+    TimeUs best = -1;
+    for (const auto &m : d.markers) {
+        if (m.time < t)
+            best = m.time;
+    }
+    return best;
+}
+
+int relinkMissingMedia(ProjectData &d, const QString &folder)
+{
+    QHash<QString, QVector<int>> wanted; // lower-case file name -> media indices
+    for (int i = 0; i < d.media.size(); ++i) {
+        if (!QFileInfo::exists(d.media[i].path))
+            wanted[QFileInfo(d.media[i].path).fileName().toLower()].append(i);
+    }
+    if (wanted.isEmpty())
+        return 0;
+    int relinked = 0;
+    QDirIterator it(folder, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext() && !wanted.isEmpty()) {
+        const QString path = it.next();
+        const QString key = it.fileName().toLower();
+        auto w = wanted.find(key);
+        if (w == wanted.end())
+            continue;
+        for (int i : *w) {
+            d.media[i].path = QFileInfo(path).absoluteFilePath();
+            ++relinked;
+        }
+        wanted.erase(w);
+    }
+    return relinked;
 }
 
 } // namespace spotlight::timeline

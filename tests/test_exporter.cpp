@@ -68,6 +68,19 @@ private slots:
         QCOMPARE(args.last(), QStringLiteral("/tmp/o.mp4"));
     }
 
+    void loudnessNormalization()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addAudio(d, 10 * S);
+        timeline::placeMedia(d, m, 2, 0);
+        ExportPreset youtube = builtInExportPresets().first();
+        QCOMPARE(youtube.loudnessLufs, -14.0);
+        QString err;
+        QVERIFY(filterGraph(Exporter::buildArguments(d, youtube, "/tmp/o.mp4", &err)).contains("loudnorm=I=-14"));
+        youtube.loudnessLufs = 0;
+        QVERIFY(!filterGraph(Exporter::buildArguments(d, youtube, "/tmp/o.mp4", &err)).contains("loudnorm"));
+    }
+
     void mutedTracksAreSkipped()
     {
         ProjectData d = ProjectData::createDefault();

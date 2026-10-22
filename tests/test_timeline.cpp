@@ -293,6 +293,73 @@ private slots:
         QCOMPARE(timeline::fadeEnvelope(c, 9 * S), 0.5);
     }
 
+    void copyPastePreservesLayoutAndLinks()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 4 * S);
+        const QUuid id = timeline::placeMedia(d, m, 0, 1 * S);
+        const auto clip = timeline::copyClips(d, {id});
+        QCOMPARE(clip.size(), 2); // video + linked audio
+        QCOMPARE(timeline::selectionEnd(d, {id}), 5 * S);
+
+        const QVector<QUuid> pasted = timeline::pasteClips(d, clip, 10 * S);
+        QCOMPARE(pasted.size(), 2);
+        QCOMPARE(d.tracks[0].clips.size(), 2);
+        QCOMPARE(d.tracks[2].clips.size(), 2);
+        const Clip *v = d.clipById(pasted[0]);
+        QCOMPARE(v->start, 10 * S);
+        // The pasted pair is linked to each other, but not to the original.
+        QCOMPARE(timeline::groupOf(d, pasted[0]).size(), 2);
+        QVERIFY(v->linkId != d.clipById(id)->linkId);
+        checkInvariants(d);
+    }
+
+    void pasteOverwritesAndSkipsLockedTracks()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 10 * S, false);
+        const QUuid id = timeline::placeMedia(d, m, 0, 0, 0, 2 * S);
+        timeline::placeMedia(d, m, 0, 3 * S, 0, 6 * S); // 3..9
+        const auto clip = timeline::copyClips(d, {id});
+        timeline::pasteClips(d, clip, 4 * S); // lands inside the second clip
+        checkInvariants(d);
+        QCOMPARE(d.tracks[0].clips.size(), 4);
+
+        d.tracks[0].locked = true;
+        QVERIFY(timeline::pasteClips(d, clip, 20 * S).isEmpty());
+    }
+
+    void markers()
+    {
+        ProjectData d = ProjectData::createDefault();
+        QVERIFY(timeline::toggleMarker(d, 5 * S, 1000));
+        QVERIFY(timeline::toggleMarker(d, 2 * S, 1000));
+        QCOMPARE(d.markers.size(), 2);
+        QCOMPARE(d.markers[0].time, 2 * S); // kept sorted
+        QCOMPARE(timeline::nextMarker(d, 0), 2 * S);
+        QCOMPARE(timeline::nextMarker(d, 2 * S), 5 * S);
+        QCOMPARE(timeline::nextMarker(d, 5 * S), TimeUs(-1));
+        QCOMPARE(timeline::previousMarker(d, 5 * S), 2 * S);
+        QCOMPARE(timeline::previousMarker(d, 2 * S), TimeUs(-1));
+        QVERIFY(!timeline::toggleMarker(d, 5 * S + 500, 1000)); // removes it
+        QCOMPARE(d.markers.size(), 1);
+    }
+
+    void relinkMissingMedia()
+    {
+        QTemporaryDir tmp;
+        QDir(tmp.path()).mkpath("deep/inside");
+        QFile f(tmp.path() + "/deep/inside/Clip.MP4");
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.close();
+        ProjectData d = ProjectData::createDefault();
+        addVideo(d, S, false, "/old/drive/clip.mp4");
+        addVideo(d, S, false, "/old/drive/gone.mp4");
+        QCOMPARE(timeline::relinkMissingMedia(d, tmp.path()), 1);
+        QCOMPARE(d.media[0].path, QFileInfo(tmp.path() + "/deep/inside/Clip.MP4").absoluteFilePath());
+        QCOMPARE(d.media[1].path, QStringLiteral("/old/drive/gone.mp4"));
+    }
+
     void timecode()
     {
         QCOMPARE(formatTimecode(0, 30), QStringLiteral("00:00:00:00"));

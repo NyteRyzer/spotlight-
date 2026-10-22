@@ -19,6 +19,7 @@ struct ExportPreset {
     QString audioCodec = QStringLiteral("aac");
     int audioBitrateKbps = 192;
     int sampleRate = 48000;
+    double loudnessLufs = 0.0;  // integrated loudness target; 0 = no normalization
     bool builtIn = false;
 
     bool isAudioOnly() const { return videoCodec.isEmpty(); }

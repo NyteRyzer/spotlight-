@@ -11,6 +11,13 @@
 
 namespace spotlight {
 
+// A named point on the timeline (chapter, beat, note to self).
+struct Marker {
+    QUuid id;
+    TimeUs time = 0;
+    QString name;
+};
+
 struct SequenceSettings {
     int width = 1920;
     int height = 1080;
@@ -33,6 +40,7 @@ struct ProjectData {
     QVector<MediaItem> media;
     QVector<Track> tracks; // video tracks first (V1 = bottom), then audio tracks
     DesignDocument design;
+    QVector<Marker> markers; // kept sorted by time
 
     // Lookup helpers -------------------------------------------------------
     const MediaItem *mediaById(const QUuid &id) const;

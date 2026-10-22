@@ -45,6 +45,9 @@ struct DesignLayer {
     QSize shapeSize = QSize(400, 200);
     QColor fillColor = QColor(255, 196, 0);
     double cornerRadius = 0.0;
+    bool gradient = false;              // linear gradient fill
+    QColor fillColor2 = QColor(255, 80, 60);
+    double gradientAngle = 90.0;        // degrees, 0 = left→right, 90 = top→bottom
 
     QJsonObject toJson() const;
     static DesignLayer fromJson(const QJsonObject &o);
