@@ -40,8 +40,44 @@ for key in CFBundleIdentifier CFBundleShortVersionString NSMicrophoneUsageDescri
   plutil -extract "$key" raw "$APP/Contents/Info.plist"
 done
 
-echo "== Self-test (from the mounted image)"
-"$BIN" --self-test "$OUT"
+echo "== Static dependency scan"
+# Every Mach-O file may only link the OS or something inside the bundle.
+bad=0
+while IFS= read -r f; do
+  file -b "$f" | grep -q Mach-O || continue
+  own="$(otool -D "$f" 2>/dev/null | tail -n +2 | head -1)" # a library's own install name isn't a load
+  deps="$(otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -vxF "${own:-<none>}" \
+          | grep -vE '^(@rpath|@loader_path|@executable_path|/usr/lib/|/System/)' || true)"
+  rpaths="$(otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -v '^@' || true)"
+  if [ -n "$deps$rpaths" ]; then
+    echo "outside reference in ${f#$APP/}:"; echo "$deps" "$rpaths" | sed 's/^/    /'
+    bad=1
+  fi
+done < <(find "$APP/Contents" -type f \( -perm -u+x -o -name '*.dylib' \))
+[ "$bad" -eq 0 ] || { echo "the bundle references files outside itself"; exit 1; }
+
+echo "== Self-test (from the mounted image), auditing every loaded library"
+DYLD_PRINT_LIBRARIES=1 "$BIN" --self-test "$OUT" 2> "$OUT.dyld" || { tail -50 "$OUT.dyld"; exit 1; }
+leaks="$(grep -oE '/(opt/homebrew|usr/local|Users)/[^ ]+' "$OUT.dyld" | sort -u || true)"
+if [ -n "$leaks" ]; then
+  echo "The app loaded libraries from outside the bundle (they won't exist on users' Macs):"
+  echo "$leaks" | sed 's/^/    /'
+  exit 1
+fi
+echo "every loaded library came from the bundle or macOS"
+
+echo "== Self-test on a simulated clean Mac (Homebrew and build Qt hidden)"
+hidden=()
+for d in /opt/homebrew /usr/local/Cellar /usr/local/opt "$HOME/Qt" "$HOME/ffmpeg-static"; do
+  if [ -e "$d" ]; then sudo mv "$d" "$d.hidden-for-test"; hidden+=("$d"); fi
+done
+restore() { for d in "${hidden[@]}"; do sudo mv "$d.hidden-for-test" "$d"; done; }
+set +e
+"$BIN" --self-test "$OUT-clean"
+code=$?
+set -e
+restore
+[ "$code" -eq 0 ] || { echo "self-test failed without Homebrew/Qt present"; exit 1; }
 
 echo "== GUI launch"
 "$BIN" &
