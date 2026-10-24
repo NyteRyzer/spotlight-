@@ -45,7 +45,8 @@ mix its audio, then design its thumbnail, all in **one project**.
 - Per-track effects: **dialogue cleanup** (denoise), **noise gate**, **de-esser**, **3-band EQ**, **compressor**,
   **voice changer** (pitch shift), **reverb**, **echo/delay** and **limiter**.
 - **Auto-ducking:** music dips automatically under voice tracks, and you can see and hear it while editing.
-- **Voiceover recording** straight onto a track while the timeline plays.
+- **Record audio** from any mic or interface (**● Record** in the Audio Studio, or `Ctrl+R`). It has a live
+  level meter, a count-in, play-along, and unlimited takes on the track you choose. Takes are saved as lossless WAV.
 - One-click presets: Podcast Voice, Music Bed, Deep Voice, Chipmunk and Big Hall. Plus clip gain, fades and
   **Normalize**.
 
@@ -86,7 +87,7 @@ Get the latest build from the **[Releases page](https://github.com/NyteRyzer/spo
 | Play / pause | `Space` | Split at playhead | `S` |
 | Previous / next frame | `←` / `→` | Ripple delete | `Shift+Del` |
 | Overwrite source clip at playhead | `.` | **Insert** source clip at playhead | `,` |
-| **Freeze frame** | `Shift+F` | **Record voiceover** | `Ctrl+R` |
+| **Freeze frame** | `Shift+F` | **Record audio** | `Ctrl+R` |
 | **Add title** | `Ctrl+Alt+T` | Add / remove marker | `M` |
 | Next / previous marker | `Shift+M` / `Alt+M` | Snapping | `N` |
 | Copy / paste / duplicate | `Ctrl+C` / `V` / `D` | Zoom in / out / fit | `=` / `-` / `\` |

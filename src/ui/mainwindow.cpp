@@ -80,6 +80,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_video->inspector(), &ClipInspector::reverseRequested, m_tools, &EditTools::reverseClip);
     connect(m_video->inspector(), &ClipInspector::editTitleRequested, m_tools, &EditTools::editTitle);
     connect(m_audio->inspector(), &ClipInspector::reverseRequested, m_tools, &EditTools::reverseClip);
+    connect(m_audio, &AudioStudio::recordRequested, m_tools, &EditTools::recordVoiceover);
     auto extender = [this](QMenu *menu, const QUuid &clipId) {
         const ProjectData &d = m_project->data();
         int ti = -1;
@@ -331,7 +332,7 @@ void MainWindow::buildMenus()
     add(QStringLiteral("timeline.beats"), tr("Add Beat Markers..."), QKeySequence(), [this] { m_tools->addBeatMarkers(); });
     add(QStringLiteral("timeline.reframe"), tr("Auto Reframe (Vertical / Square)..."), QKeySequence(),
         [this] { m_tools->autoReframe(); });
-    add(QStringLiteral("timeline.voiceover"), tr("Record Voiceover..."), QKeySequence(tr("Ctrl+R")),
+    add(QStringLiteral("timeline.voiceover"), tr("Record Audio..."), QKeySequence(tr("Ctrl+R")),
         [this] { m_tools->recordVoiceover(); });
     tl->addSeparator();
     add(QStringLiteral("timeline.zoomin"), tr("Zoom In"), QKeySequence(Qt::Key_Equal), [this] { activeTimeline()->zoomIn(); });

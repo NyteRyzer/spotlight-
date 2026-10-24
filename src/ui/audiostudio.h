@@ -83,6 +83,9 @@ public:
     TimelineWidget *timeline() const { return m_timeline; }
     ClipInspector *inspector() const { return m_inspector; }
 
+signals:
+    void recordRequested();
+
 private:
     void rebuildMixer();
 

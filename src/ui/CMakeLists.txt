@@ -8,6 +8,7 @@ add_library(spotlight_ui STATIC
     timelinewidget.h timelinewidget.cpp
     inspector.h inspector.cpp
     edittools.h edittools.cpp
+    recorddialog.h recorddialog.cpp
     videostudio.h videostudio.cpp
     audiostudio.h audiostudio.cpp
     designcanvas.h designcanvas.cpp

@@ -411,6 +411,13 @@ AudioStudio::AudioStudio(Project *project, TimelinePlayer *player, MediaBin *bin
     transport->addSeparator();
     transport->addWidget(m_time);
     transport->addSeparator();
+    auto *rec = new QToolButton(transport);
+    rec->setText(tr("●  Record"));
+    rec->setToolTip(tr("Record audio from your microphone at the playhead (Ctrl+R)"));
+    rec->setStyleSheet(QStringLiteral("QToolButton { color: #ff5050; font-weight: bold; padding: 4px 10px; }"));
+    connect(rec, &QToolButton::clicked, this, &AudioStudio::recordRequested);
+    transport->addWidget(rec);
+    transport->addSeparator();
     transport->addAction(tr("Import Audio…"), bin, &MediaBin::importDialog);
     transport->addAction(tr("Zoom In"), m_timeline, &TimelineWidget::zoomIn);
     transport->addAction(tr("Zoom Out"), m_timeline, &TimelineWidget::zoomOut);

@@ -9,6 +9,12 @@
 #include "media/videoview.h"
 #include "ui/inspector.h"
 #include "ui/edittools.h"
+#include "ui/recorddialog.h"
+#include <QCheckBox>
+#include <QLabel>
+#include <QAudioDevice>
+#include <QMediaDevices>
+#include <QPushButton>
 #include <QTabWidget>
 #include "ui/programmonitor.h"
 #include "ui/theme.h"
@@ -172,6 +178,64 @@ private slots:
         QCOMPARE(QColor(out.pixel(27, 50)), QColor(Qt::white));   // stroke around the cut-out
     }
 
+
+    // Records a real take from the default input (skipped without one).
+    void recordsAudioTakes()
+    {
+        // Device lists can fill in asynchronously after startup.
+        QMediaDevices devices;
+        for (int i = 0; i < 30 && QMediaDevices::audioInputs().isEmpty(); ++i)
+            QTest::qWait(100);
+        if (QMediaDevices::audioInputs().isEmpty())
+            QSKIP("no audio input device", "");
+        Project project;
+        TimelinePlayer player(&project, new VideoView);
+        RecordDialog dlg(&project, &player, QUuid());
+        for (auto *cb : dlg.findChildren<QCheckBox *>()) {
+            if (cb->text().contains("count-in") || cb->text().contains("Play the timeline"))
+                cb->setChecked(false);
+        }
+        QPushButton *rec = nullptr;
+        for (auto *b : dlg.findChildren<QPushButton *>()) {
+            if (b->text().contains("Record"))
+                rec = b;
+        }
+        QVERIFY(rec && rec->isEnabled());
+        dlg.show();
+        // Wait until the level meter shows signal from the input.
+        auto hasSignal = [&] {
+            for (auto *l : dlg.findChildren<QLabel *>()) {
+                if (l->text().endsWith(" dB") && !l->text().startsWith(QChar(0x2212)))
+                    return true;
+            }
+            return false;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(hasSignal(), 10000);
+        for (int take = 1; take <= 2; ++take) {
+            rec->click();
+            QTest::qWait(1500);
+            const QString shots = qEnvironmentVariable("SPOTLIGHT_SCREENSHOT_DIR");
+            if (!shots.isEmpty() && take == 2)
+                dlg.grab().save(shots + "/record-dialog.png");
+            rec->click();
+            QTRY_COMPARE_WITH_TIMEOUT(dlg.takesRecorded(), take, 15000);
+        }
+        // Two takes on two new tracks, each ~1.5 s long, with real audio.
+        int clips = 0;
+        for (const auto &t : project.data().tracks) {
+            if (t.isAudio() && t.name.startsWith("Rec")) {
+                QCOMPARE(t.clips.size(), 1);
+                QVERIFY(t.voice);
+                QVERIFY2(t.clips[0].duration() > kUsPerSecond, qPrintable(QString::number(t.clips[0].duration())));
+                ++clips;
+            }
+        }
+        QCOMPARE(clips, 2);
+        QVERIFY(project.data().media.last().hasAudio);
+        QVERIFY(QFileInfo(project.data().media.last().path).size() > 10000);
+        static_cast<QDialog &>(dlg).reject();
+    }
+
     void mainWindowWorkflow()
     {
         MainWindow w;
@@ -287,7 +351,7 @@ private slots:
         for (const QString &name : {QStringLiteral("Freeze Frame"), QStringLiteral("Reverse Clip"),
                                     QStringLiteral("Remove Silences (Jump Cuts)..."),
                                     QStringLiteral("Scene Edit Detection"), QStringLiteral("Add Beat Markers..."),
-                                    QStringLiteral("Record Voiceover..."), QStringLiteral("Add Title..."),
+                                    QStringLiteral("Record Audio..."), QStringLiteral("Add Title..."),
                                     QStringLiteral("Import Captions (SRT)..."), QStringLiteral("Close Gaps on Track"),
                                     QStringLiteral("Insert Source Clip at Playhead")}) {
             bool found = false;

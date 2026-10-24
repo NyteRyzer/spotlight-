@@ -10,6 +10,7 @@
 #include "media/mediaprobe.h"
 #include "media/timelineplayer.h"
 #include "ui/mediabin.h"
+#include "ui/recorddialog.h"
 #include "ui/timelinewidget.h"
 
 #include <QAudioDevice>
@@ -697,136 +698,17 @@ void EditTools::exportCaptions()
 
 void EditTools::recordVoiceover()
 {
-    const auto inputs = QMediaDevices::audioInputs();
-    if (inputs.isEmpty()) {
-        QMessageBox::warning(m_window, tr("Record Voiceover"), tr("No microphone was found."));
-        return;
+    // Default to the audio track the user is working on, if any.
+    QUuid preferred;
+    if (TimelineWidget *tl = timeline()) {
+        const ProjectData &d = m_project->data();
+        const int ti = tl->currentTrack();
+        if (ti >= 0 && ti < d.tracks.size() && d.tracks[ti].isAudio())
+            preferred = d.tracks[ti].id;
     }
-    QDialog dlg(m_window);
-    dlg.setWindowTitle(tr("Record Voiceover"));
-    auto *layout = new QVBoxLayout(&dlg);
-    auto *form = new QFormLayout;
-    layout->addLayout(form);
-    auto *device = new QComboBox(&dlg);
-    for (const auto &in : inputs)
-        device->addItem(in.description());
-    const QAudioDevice def = QMediaDevices::defaultAudioInput();
-    for (int i = 0; i < inputs.size(); ++i) {
-        if (inputs[i].id() == def.id())
-            device->setCurrentIndex(i);
-    }
-    form->addRow(tr("Microphone"), device);
-    auto *playAlong = new QCheckBox(tr("Play the timeline while recording (use headphones)"), &dlg);
-    playAlong->setChecked(true);
-    form->addRow(playAlong);
-    auto *timeLabel = new QLabel(QStringLiteral("00:00"), &dlg);
-    QFont big = timeLabel->font();
-    big.setPointSizeF(big.pointSizeF() * 2.2);
-    big.setBold(true);
-    timeLabel->setFont(big);
-    timeLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(timeLabel);
-    auto *hint = new QLabel(tr("Recording starts at the playhead (%1) and is placed on an audio track when you stop.")
-                                .arg(formatTimecode(m_player->position(), m_project->data().sequence.frameRate)),
-                            &dlg);
-    hint->setWordWrap(true);
-    layout->addWidget(hint);
-    auto *recordBtn = new QPushButton(tr("●  Record"), &dlg);
-    recordBtn->setStyleSheet(QStringLiteral("QPushButton { color: #ff5050; font-weight: bold; padding: 8px; }"));
-    layout->addWidget(recordBtn);
-
-    QMediaCaptureSession session;
-    QAudioInput input;
-    session.setAudioInput(&input);
-    QMediaRecorder recorder;
-    session.setRecorder(&recorder);
-    QMediaFormat fmt;
-    const auto formats = fmt.supportedFileFormats(QMediaFormat::Encode);
-    if (formats.contains(QMediaFormat::Wave)) {
-        fmt.setFileFormat(QMediaFormat::Wave);
-        fmt.setAudioCodec(QMediaFormat::AudioCodec::Wave);
-    } else {
-        fmt.setFileFormat(QMediaFormat::Mpeg4Audio);
-        fmt.setAudioCodec(QMediaFormat::AudioCodec::AAC);
-    }
-    recorder.setMediaFormat(fmt);
-    recorder.setQuality(QMediaRecorder::VeryHighQuality);
-    const QString ext = fmt.fileFormat() == QMediaFormat::Wave ? QStringLiteral("wav") : QStringLiteral("m4a");
-    const QString path = mediaDir(m_project, QStringLiteral("Voiceovers"))
-        + QStringLiteral("/voiceover-%1.%2").arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")), ext);
-    recorder.setOutputLocation(QUrl::fromLocalFile(path));
-
-    const TimeUs startAt = m_player->position();
-    QTimer tick;
-    tick.setInterval(200);
-    connect(&tick, &QTimer::timeout, &dlg, [&] {
-        const qint64 s = recorder.duration() / 1000;
-        timeLabel->setText(QStringLiteral("%1:%2").arg(s / 60, 2, 10, QLatin1Char('0')).arg(s % 60, 2, 10, QLatin1Char('0')));
-    });
-    QString recordError;
-    connect(&recorder, &QMediaRecorder::errorOccurred, &dlg, [&](QMediaRecorder::Error, const QString &e) {
-        recordError = e;
-        dlg.reject();
-    });
-    bool recorded = false;
-    connect(recordBtn, &QPushButton::clicked, &dlg, [&] {
-        if (recorder.recorderState() == QMediaRecorder::RecordingState) {
-            recorder.stop();
-            tick.stop();
-            m_player->pause();
-            recorded = true;
-            dlg.accept();
-            return;
-        }
-        input.setDevice(inputs[device->currentIndex()]);
-        device->setEnabled(false);
-        playAlong->setEnabled(false);
-        recorder.record();
-        tick.start();
-        if (playAlong->isChecked())
-            m_player->play();
-        recordBtn->setText(tr("■  Stop"));
-    });
+    RecordDialog dlg(m_project, m_player, preferred, m_window);
+    connect(&dlg, &RecordDialog::status, this, &EditTools::status);
     dlg.exec();
-    if (recorder.recorderState() == QMediaRecorder::RecordingState) {
-        recorder.stop();
-        m_player->pause();
-    }
-    if (!recordError.isEmpty()) {
-        QMessageBox::warning(m_window, tr("Record Voiceover"), recordError);
-        return;
-    }
-    if (!recorded)
-        return;
-    // Wait for the recorder to finalise the file.
-    QElapsedTimer wait;
-    wait.start();
-    while (recorder.recorderState() != QMediaRecorder::StoppedState && wait.elapsed() < 5000)
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-    const QString actual = recorder.actualLocation().toLocalFile().isEmpty() ? path
-                                                                             : recorder.actualLocation().toLocalFile();
-    MediaItem item;
-    QString err;
-    if (!probeFile(actual, &item, &err)) {
-        QMessageBox::warning(m_window, tr("Record Voiceover"), tr("The recording could not be read: %1").arg(err));
-        return;
-    }
-    item.name = tr("Voiceover %1").arg(QTime::currentTime().toString(QStringLiteral("HH:mm")));
-    m_project->edit(tr("Record Voiceover"), [&](ProjectData &d) {
-        d.media.append(item);
-        // A dedicated, ducking-friendly voice track.
-        int track = -1;
-        for (int ti : d.audioTrackIndices()) {
-            if (d.tracks[ti].name == tr("Voiceover"))
-                track = ti;
-        }
-        if (track < 0) {
-            track = d.addTrack(TrackType::Audio, tr("Voiceover"));
-            d.tracks[track].voice = true;
-        }
-        timeline::placeMedia(d, item.id, track, startAt);
-    });
-    emit status(tr("Voiceover recorded (%1).").arg(formatDuration(item.duration)));
 }
 
 void EditTools::insertAtPlayhead()
