@@ -878,4 +878,36 @@ int splitAtTimes(ProjectData &d, const QUuid &clipId, const QVector<TimeUs> &cut
     return n;
 }
 
+const Clip *previousAdjacent(const Track &t, const Clip &c)
+{
+    for (const Clip &o : t.clips) {
+        if (o.id != c.id && std::abs(o.end() - c.start) <= kUsPerMs)
+            return &o;
+    }
+    return nullptr;
+}
+
+Transition effectiveTransition(const Track &t, const Clip &c)
+{
+    Transition tr = c.transition;
+    if (tr.isNone() || !previousAdjacent(t, c))
+        return {};
+    tr.duration = std::min(tr.duration, c.duration() - kUsPerMs);
+    if (tr.duration < kMinClipDuration)
+        return {};
+    return tr;
+}
+
+double videoAlpha(const Track &t, const Clip &c, TimeUs at)
+{
+    Clip f = c;
+    if (!effectiveTransition(t, c).isNone())
+        f.fadeIn = 0;
+    for (const Clip &o : t.clips) {
+        if (o.id != c.id && std::abs(o.start - c.end()) <= kUsPerMs && !effectiveTransition(t, o).isNone())
+            f.fadeOut = 0;
+    }
+    return fadeEnvelope(f, at);
+}
+
 } // namespace spotlight::timeline

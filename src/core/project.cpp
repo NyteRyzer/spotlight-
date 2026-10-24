@@ -1,5 +1,7 @@
 #include "core/project.h"
 
+#include "core/titles.h"
+
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QUndoCommand>
@@ -138,6 +140,8 @@ bool Project::open(const QString &path, QString *error)
     ProjectData d;
     if (!loadProjectFile(path, &d, error))
         return false;
+    // Titles are generated images; recreate any that didn't travel with the project.
+    titles::restoreMissingTitles(d.media);
     reset(d, path);
     return true;
 }

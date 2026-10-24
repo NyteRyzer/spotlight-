@@ -15,6 +15,8 @@ class QFontComboBox;
 class QCheckBox;
 class QPushButton;
 class QLabel;
+class QFormLayout;
+class QAction;
 
 namespace spotlight {
 
@@ -62,6 +64,13 @@ private:
     void editLayer(const QString &what, const std::function<void(DesignLayer &)> &fn);
     QPushButton *colorButton(const QString &what, std::function<QColor(const DesignLayer &)> get,
                              std::function<void(DesignLayer &, const QColor &)> set);
+    // Generic property rows bound to the selected layer.
+    QSlider *bindSlider(QFormLayout *form, const QString &label, int min, int max, double scale,
+                        std::function<double(const DesignLayer &)> get, std::function<void(DesignLayer &, double)> set);
+    QCheckBox *bindCheck(QFormLayout *form, const QString &label, std::function<bool(const DesignLayer &)> get,
+                         std::function<void(DesignLayer &, bool)> set);
+    void alignSelected(int how); // 0 left, 1 centre, 2 right, 3 top, 4 middle, 5 bottom
+    void updateBrush();
 
     Project *m_project;
     DesignCanvas *m_canvas;
@@ -93,6 +102,13 @@ private:
     QCheckBox *m_gradient;
     QDoubleSpinBox *m_gradientAngle;
     QVector<std::function<void()>> m_colorRefreshers;
+    QVector<std::function<void(const DesignLayer &)>> m_layerRefreshers;
+    QWidget *m_effectsProps = nullptr;
+    QAction *m_brushAct = nullptr;
+    QColor m_brushColor = QColor(255, 220, 40);
+    QDoubleSpinBox *m_brushSize = nullptr;
+    QCheckBox *m_eraser = nullptr;
+    QPushButton *m_brushColorBtn = nullptr;
     bool m_updating = false;
 };
 

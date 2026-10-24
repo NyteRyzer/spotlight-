@@ -21,6 +21,7 @@ class VideoStudio;
 class AudioStudio;
 class DesignStudio;
 class TimelineWidget;
+class EditTools;
 
 // The unified SPOTLIGHT! window: one project, three connected studios.
 class MainWindow : public QMainWindow {
@@ -74,6 +75,7 @@ private:
     VideoStudio *m_video;
     AudioStudio *m_audio;
     DesignStudio *m_design;
+    EditTools *m_tools;
     QMenu *m_recentMenu = nullptr;
     QMenu *m_layoutMenu = nullptr;
     QLabel *m_autosaveLabel;

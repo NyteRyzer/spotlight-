@@ -23,6 +23,7 @@ public:
     SourceMonitor *sourceMonitor() const { return m_source; }
     ProgramMonitor *programMonitor() const { return m_program; }
     TimelineWidget *timeline() const { return m_timeline; }
+    ClipInspector *inspector() const { return m_inspector; }
 
 signals:
     void captureFrame(const QImage &frame);

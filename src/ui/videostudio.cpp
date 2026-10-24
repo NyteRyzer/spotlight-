@@ -49,7 +49,7 @@ VideoStudio::VideoStudio(Project *project, QWidget *parent)
     addDockWidget(Qt::LeftDockWidgetArea, binDock);
     addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
     addDockWidget(Qt::BottomDockWidgetArea, timelineDock);
-    resizeDocks({sourceDock, inspectorDock}, {520, 260}, Qt::Horizontal);
+    resizeDocks({sourceDock, inspectorDock}, {500, 330}, Qt::Horizontal);
     resizeDocks({timelineDock}, {300}, Qt::Vertical);
 
     m_timeline->setThumbnailProvider([this](const QString &path) { return m_bin->thumbnail(path); });

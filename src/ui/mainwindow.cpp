@@ -3,11 +3,14 @@
 #include "core/autosave.h"
 #include "core/project.h"
 #include "core/timelineops.h"
+#include "core/titles.h"
 #include "media/timelineplayer.h"
 #include "media/videoview.h"
 #include "ui/actions.h"
 #include "ui/audiostudio.h"
 #include "ui/designstudio.h"
+#include "ui/edittools.h"
+#include "ui/inspector.h"
 #include "ui/exportdialog.h"
 #include "ui/mediabin.h"
 #include "ui/programmonitor.h"
@@ -70,6 +73,34 @@ MainWindow::MainWindow(QWidget *parent)
     m_stack->addWidget(m_video);
     m_stack->addWidget(m_audio);
     m_stack->addWidget(m_design);
+    m_tools = new EditTools(m_project, m_video->programMonitor()->player(), m_video->mediaBin(), this);
+    m_tools->setTimelineProvider([this] { return activeTimeline(); });
+    connect(m_tools, &EditTools::status, this, [this](const QString &m) { statusBar()->showMessage(m, 8000); });
+    connect(m_video->inspector(), &ClipInspector::freezeFrameRequested, m_tools, &EditTools::freezeFrame);
+    connect(m_video->inspector(), &ClipInspector::reverseRequested, m_tools, &EditTools::reverseClip);
+    connect(m_video->inspector(), &ClipInspector::editTitleRequested, m_tools, &EditTools::editTitle);
+    connect(m_audio->inspector(), &ClipInspector::reverseRequested, m_tools, &EditTools::reverseClip);
+    auto extender = [this](QMenu *menu, const QUuid &clipId) {
+        const ProjectData &d = m_project->data();
+        int ti = -1;
+        const Clip *c = d.clipById(clipId, &ti);
+        const MediaItem *m = c ? d.mediaById(c->mediaId) : nullptr;
+        if (!c || !m)
+            return;
+        menu->addSeparator();
+        if (d.tracks[ti].isVideo() && !m->isStill())
+            menu->addAction(tr("Freeze Frame at Playhead"), m_tools, &EditTools::freezeFrame);
+        if (!m->isStill())
+            menu->addAction(tr("Reverse"), m_tools, &EditTools::reverseClip);
+        if (m->hasAudio)
+            menu->addAction(tr("Remove Silences..."), m_tools, &EditTools::removeSilences);
+        if (d.tracks[ti].isVideo() && m->hasVideo && !m->isStill())
+            menu->addAction(tr("Split at Scene Changes"), m_tools, &EditTools::detectScenes);
+        if (m->isTitle())
+            menu->addAction(tr("Edit Title Text..."), m_tools, &EditTools::editTitle);
+    };
+    m_video->timeline()->setClipMenuExtender(extender);
+    m_audio->timeline()->setClipMenuExtender(extender);
 
     // Top bar: logo + workspace switcher.
     auto *central = new QWidget(this);
@@ -288,6 +319,20 @@ void MainWindow::buildMenus()
         TimelinePlayer *p = m_video->programMonitor()->player();
         m_project->edit(tr("Add Clip"), [&](ProjectData &d) { timeline::placeMedia(d, id, -1, p->position()); });
     });
+    add(QStringLiteral("timeline.insert"), tr("Insert Source Clip at Playhead"), QKeySequence(Qt::Key_Comma),
+        [this] { m_tools->insertAtPlayhead(); });
+    add(QStringLiteral("timeline.freeze"), tr("Freeze Frame"), QKeySequence(tr("Shift+F")), [this] { m_tools->freezeFrame(); });
+    add(QStringLiteral("timeline.reverse"), tr("Reverse Clip"), QKeySequence(), [this] { m_tools->reverseClip(); });
+    add(QStringLiteral("timeline.closegaps"), tr("Close Gaps on Track"), QKeySequence(), [this] { m_tools->closeGaps(); });
+    tl->addSeparator();
+    add(QStringLiteral("timeline.silences"), tr("Remove Silences (Jump Cuts)..."), QKeySequence(),
+        [this] { m_tools->removeSilences(); });
+    add(QStringLiteral("timeline.scenes"), tr("Scene Edit Detection"), QKeySequence(), [this] { m_tools->detectScenes(); });
+    add(QStringLiteral("timeline.beats"), tr("Add Beat Markers..."), QKeySequence(), [this] { m_tools->addBeatMarkers(); });
+    add(QStringLiteral("timeline.reframe"), tr("Auto Reframe (Vertical / Square)..."), QKeySequence(),
+        [this] { m_tools->autoReframe(); });
+    add(QStringLiteral("timeline.voiceover"), tr("Record Voiceover..."), QKeySequence(tr("Ctrl+R")),
+        [this] { m_tools->recordVoiceover(); });
     tl->addSeparator();
     add(QStringLiteral("timeline.zoomin"), tr("Zoom In"), QKeySequence(Qt::Key_Equal), [this] { activeTimeline()->zoomIn(); });
     add(QStringLiteral("timeline.zoomout"), tr("Zoom Out"), QKeySequence(Qt::Key_Minus),
@@ -324,6 +369,34 @@ void MainWindow::buildMenus()
     add(QStringLiteral("timeline.addaudiotrack"), tr("Add Audio Track"), QKeySequence(), [this] {
         m_project->edit(tr("Add Track"), [](ProjectData &d) { d.addTrack(TrackType::Audio); });
     });
+
+    // ---- Titles ----
+    QMenu *titlesMenu = menuBar()->addMenu(tr("T&itles"));
+    const QString TT = tr("Titles");
+    auto *addTitleAct = makeAction(this, QStringLiteral("titles.add"), TT, tr("Add Title..."), QKeySequence(tr("Ctrl+Alt+T")));
+    connect(addTitleAct, &QAction::triggered, this, [this] {
+        setWorkspace(Video);
+        m_tools->addTitle(0);
+    });
+    titlesMenu->addAction(addTitleAct);
+    QMenu *styles = titlesMenu->addMenu(tr("Add Title Style"));
+    const QStringList presetNames = titles::presetNames();
+    for (int i = 0; i < presetNames.size(); ++i) {
+        styles->addAction(presetNames[i], this, [this, i] {
+            setWorkspace(Video);
+            m_tools->addTitle(i);
+        });
+    }
+    auto *editTitleAct = makeAction(this, QStringLiteral("titles.edit"), TT, tr("Edit Title Text..."));
+    connect(editTitleAct, &QAction::triggered, m_tools, &EditTools::editTitle);
+    titlesMenu->addAction(editTitleAct);
+    titlesMenu->addSeparator();
+    auto *importSrt = makeAction(this, QStringLiteral("titles.importsrt"), TT, tr("Import Captions (SRT)..."));
+    connect(importSrt, &QAction::triggered, m_tools, &EditTools::importCaptions);
+    titlesMenu->addAction(importSrt);
+    auto *exportSrt = makeAction(this, QStringLiteral("titles.exportsrt"), TT, tr("Export Captions (SRT)..."));
+    connect(exportSrt, &QAction::triggered, m_tools, &EditTools::exportCaptions);
+    titlesMenu->addAction(exportSrt);
 
     // ---- Design ----
     QMenu *design = menuBar()->addMenu(tr("&Design"));
@@ -551,6 +624,7 @@ void MainWindow::offerRecovery()
         QMessageBox::critical(this, tr("Recovery Failed"), err);
         return;
     }
+    titles::restoreMissingTitles(d.media);
     m_project->reset(d, e.originalPath);
     // The recovered state differs from what's on disk: keep it flagged and
     // autosaved until the user saves.

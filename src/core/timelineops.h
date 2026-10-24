@@ -144,6 +144,15 @@ int addBeatMarkers(ProjectData &d, double bpm, TimeUs offset, TimeUs from, TimeU
 QUuid insertFreezeFrame(ProjectData &d, const QUuid &clipId, TimeUs at, const QUuid &stillMediaId,
                         TimeUs duration);
 
+// The clip on the same track ending exactly where `c` starts, or nullptr.
+const Clip *previousAdjacent(const Track &t, const Clip &c);
+// The transition into `c` with its duration clamped to what fits, or none
+// when there is no adjacent clip to transition from.
+Transition effectiveTransition(const Track &t, const Clip &c);
+// Opacity (0..1) of a video clip at time t from its fades. Fades are skipped
+// where a transition takes over (as in the export).
+double videoAlpha(const Track &t, const Clip &c, TimeUs at);
+
 // Splits a clip (and partners) at every time in `cuts` that falls inside it.
 int splitAtTimes(ProjectData &d, const QUuid &clipId, const QVector<TimeUs> &cuts);
 

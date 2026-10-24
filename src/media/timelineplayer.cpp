@@ -1,5 +1,6 @@
 #include "media/timelineplayer.h"
 
+#include "core/looks.h"
 #include "core/project.h"
 #include "core/timelineops.h"
 #include "media/videoview.h"
@@ -23,15 +24,6 @@ TimelinePlayer::TimelinePlayer(Project *project, VideoView *view, QObject *paren
     , m_project(project)
     , m_view(view)
 {
-    m_video = makeLane(false);
-    m_video.player->setVideoSink(view->videoSink());
-    connect(view->videoSink(), &QVideoSink::videoFrameChanged, this, [this] {
-        if (m_frameRequested && !m_playing) {
-            m_frameRequested = false;
-            m_video.player->pause();
-        }
-    });
-
     m_timer.setInterval(15);
     m_timer.setTimerType(Qt::PreciseTimer);
     connect(&m_timer, &QTimer::timeout, this, &TimelinePlayer::tick);
@@ -46,13 +38,39 @@ TimelinePlayer::TimelinePlayer(Project *project, VideoView *view, QObject *paren
 
 TimelinePlayer::~TimelinePlayer() = default;
 
-TimelinePlayer::Lane TimelinePlayer::makeLane(bool withAudio)
+TimelinePlayer::Lane *TimelinePlayer::laneFor(QMediaPlayer *player)
+{
+    for (auto &l : m_video) {
+        if (l.player == player)
+            return &l;
+    }
+    for (auto &l : m_audio) {
+        if (l.player == player)
+            return &l;
+    }
+    return nullptr;
+}
+
+TimelinePlayer::Lane TimelinePlayer::makeLane(bool withAudio, int slot)
 {
     Lane lane;
     lane.player = new QMediaPlayer(this);
+    lane.slot = slot;
     if (withAudio) {
         lane.output = new QAudioOutput(this);
         lane.player->setAudioOutput(lane.output);
+    }
+    if (slot >= 0) {
+        QVideoSink *sink = m_view->sinkFor(slot);
+        lane.player->setVideoSink(sink);
+        QMediaPlayer *player = lane.player;
+        connect(sink, &QVideoSink::videoFrameChanged, this, [this, player] {
+            Lane *l = laneFor(player);
+            if (l && l->frameRequested && !m_playing) {
+                l->frameRequested = false;
+                player->pause();
+            }
+        });
     }
     // Seeking is only reliable once the media is loaded; apply it then.
     QMediaPlayer *player = lane.player;
@@ -63,13 +81,7 @@ TimelinePlayer::Lane TimelinePlayer::makeLane(bool withAudio)
         [this, player](QMediaPlayer::MediaStatus s) {
         if (s != QMediaPlayer::LoadedMedia && s != QMediaPlayer::BufferedMedia)
             return;
-        Lane *l = nullptr;
-        if (m_video.player == player)
-            l = &m_video;
-        for (auto &a : m_audio) {
-            if (a.player == player)
-                l = &a;
-        }
+        Lane *l = laneFor(player);
         if (!l || l->pendingSeekMs < 0)
             return;
         const qint64 target = l->pendingSeekMs;
@@ -81,8 +93,8 @@ TimelinePlayer::Lane TimelinePlayer::makeLane(bool withAudio)
         else
             player->pause();
         player->setPosition(target);
-        if (!m_playing && player == m_video.player)
-            requestPausedFrame();
+        if (!m_playing && l->slot >= 0)
+            requestPausedFrame(*l);
         // Safety net: if the seek still didn't stick, retry once the
         // pipeline has settled.
         QTimer::singleShot(150, player, [player, target] {
@@ -108,10 +120,10 @@ QImage TimelinePlayer::stillImage(const QString &path)
     return img;
 }
 
-void TimelinePlayer::requestPausedFrame()
+void TimelinePlayer::requestPausedFrame(Lane &lane)
 {
-    m_frameRequested = true;
-    m_video.player->play(); // no audio output: silent
+    lane.frameRequested = true;
+    lane.player->play(); // no audio output: silent
 }
 
 void TimelinePlayer::play()
@@ -137,7 +149,8 @@ void TimelinePlayer::pause()
         return;
     m_playing = false;
     m_timer.stop();
-    m_video.player->pause();
+    for (auto &v : m_video)
+        v.player->pause();
     for (auto &a : m_audio)
         a.player->pause();
     sync(true);
@@ -199,10 +212,13 @@ void TimelinePlayer::stopLane(Lane &lane)
     lane.player->setSource(QUrl());
     lane.source.clear();
     lane.pendingSeekMs = -1;
+    lane.frameRequested = false;
 }
 
-void TimelinePlayer::driveLane(Lane &lane, const QString &path, qint64 srcMs, bool forceSeek)
+void TimelinePlayer::driveLane(Lane &lane, const QString &path, qint64 srcMs, bool forceSeek, double rate)
 {
+    if (!qFuzzyCompare(lane.player->playbackRate(), rate))
+        lane.player->setPlaybackRate(rate);
     if (lane.source != path) {
         lane.source = path;
         lane.pendingSeekMs = srcMs;
@@ -214,40 +230,87 @@ void TimelinePlayer::driveLane(Lane &lane, const QString &path, qint64 srcMs, bo
         return;
     }
     const qint64 drift = std::abs(lane.player->position() - srcMs);
-    if (forceSeek || drift > kDriftToleranceMs) {
+    if (forceSeek || drift > kDriftToleranceMs * std::max(1.0, rate)) {
         lane.player->setPosition(srcMs);
-        if (!m_playing && &lane == &m_video) {
-            requestPausedFrame();
+        if (!m_playing && lane.slot >= 0) {
+            requestPausedFrame(lane);
             return;
         }
     }
     if (m_playing && lane.player->playbackState() != QMediaPlayer::PlayingState)
         lane.player->play();
-    else if (!m_playing && lane.player->playbackState() == QMediaPlayer::PlayingState)
+    else if (!m_playing && lane.player->playbackState() == QMediaPlayer::PlayingState && !lane.frameRequested)
         lane.player->pause();
+}
+
+bool TimelinePlayer::prepareLayer(ViewLayer &layer, Lane &lane, const Clip &clip, TimeUs at, bool forceSeek)
+{
+    const ProjectData &d = m_project->data();
+    const MediaItem *media = d.mediaById(clip.mediaId);
+    if (!media)
+        return false;
+    layer.clip = clip;
+    layer.slot = lane.slot;
+    layer.progress = clip.duration() > 0 ? double(at - clip.start) / double(clip.duration()) : 0.0;
+    if (media->isStill()) {
+        stopLane(lane);
+        layer.still = stillImage(media->path);
+        return true;
+    }
+    // Past the out-point (outgoing clip of a transition) use media handles,
+    // holding the last frame where the media ends.
+    TimeUs src = clip.sourceAt(at);
+    if (media->duration > 0)
+        src = std::min(src, media->duration - 40 * kUsPerMs);
+    driveLane(lane, media->path, usToMs(std::max<TimeUs>(0, src)), forceSeek, clip.speed);
+    return true;
 }
 
 void TimelinePlayer::syncVideo(bool forceSeek)
 {
     const ProjectData &d = m_project->data();
-    const Clip *clip = timeline::topVideoClipAt(d, m_pos);
-    const MediaItem *media = clip ? d.mediaById(clip->mediaId) : nullptr;
-    if (!clip || !media) {
-        stopLane(m_video);
-        m_view->showBlack();
-        m_view->setAdjust(ColorAdjust(), 1.0);
-        m_view->setPlaceholderText(d.duration() > 0 ? QString()
-                                                    : tr("Drag clips from the Media Bin onto the timeline"));
-        return;
+    const QVector<int> videos = d.videoTrackIndices();
+    while (m_video.size() < videos.size() * 2)
+        m_video.append(makeLane(false, m_video.size()));
+    while (m_video.size() > videos.size() * 2) {
+        Lane l = m_video.takeLast();
+        l.player->stop();
+        l.player->deleteLater();
     }
-    m_view->setPlaceholderText(QString());
-    m_view->setAdjust(clip->color, timeline::fadeEnvelope(*clip, m_pos));
-    if (media->isStill()) {
-        stopLane(m_video);
-        m_view->setStillImage(stillImage(media->path));
-        return;
+
+    QVector<ViewTrack> tracks;
+    for (int vi = 0; vi < videos.size(); ++vi) {
+        const Track &track = d.tracks[videos[vi]];
+        Lane &main = m_video[vi * 2];
+        Lane &aux = m_video[vi * 2 + 1];
+        const int ci = track.muted ? -1 : timeline::clipIndexAt(track, m_pos);
+        if (ci < 0) {
+            stopLane(main);
+            stopLane(aux);
+            continue;
+        }
+        const Clip &clip = track.clips[ci];
+        ViewTrack vt;
+        if (!prepareLayer(vt.layer, main, clip, m_pos, forceSeek)) {
+            stopLane(main);
+            stopLane(aux);
+            continue;
+        }
+        vt.layer.alpha = timeline::videoAlpha(track, clip, m_pos);
+        const Transition tr = timeline::effectiveTransition(track, clip);
+        const Clip *prev = tr.isNone() ? nullptr : timeline::previousAdjacent(track, clip);
+        if (prev && m_pos < clip.start + tr.duration && prepareLayer(vt.outgoing, aux, *prev, m_pos, forceSeek)) {
+            vt.inTransition = true;
+            vt.transition = tr.type;
+            vt.transitionProgress = double(m_pos - clip.start) / double(tr.duration);
+            vt.outgoing.alpha = 1.0;
+        } else {
+            stopLane(aux);
+        }
+        tracks.append(vt);
     }
-    driveLane(m_video, media->path, usToMs(clip->in + (m_pos - clip->start)), forceSeek);
+    m_view->setTracks(tracks);
+    m_view->setPlaceholderText(d.duration() > 0 ? QString() : tr("Drag clips from the Media Bin onto the timeline"));
 }
 
 void TimelinePlayer::syncAudio(bool forceSeek)
@@ -274,17 +337,19 @@ void TimelinePlayer::syncAudio(bool forceSeek)
             stopLane(lane);
             continue;
         }
-        const double vol = track.volume * clip->gain * timeline::fadeEnvelope(*clip, m_pos);
+        double vol = track.volume * clip->gain * timeline::fadeEnvelope(*clip, m_pos);
+        if (track.fx.duckUnderVoice)
+            vol *= duckGain(voiceRanges(d, ti), track.fx.duckAmountDb, m_pos);
         lane.output->setVolume(float(std::clamp(vol, 0.0, 1.0)));
         if (!m_playing) {
             // Silent while paused, but keep the source loaded for a fast start.
             if (lane.source != media->path)
-                driveLane(lane, media->path, usToMs(clip->in + (m_pos - clip->start)), true);
+                driveLane(lane, media->path, usToMs(clip->sourceAt(m_pos)), true, clip->speed);
             else if (lane.player->playbackState() == QMediaPlayer::PlayingState)
                 lane.player->pause();
             continue;
         }
-        driveLane(lane, media->path, usToMs(clip->in + (m_pos - clip->start)), forceSeek);
+        driveLane(lane, media->path, usToMs(clip->sourceAt(m_pos)), forceSeek, clip->speed);
     }
 }
 

@@ -2,33 +2,63 @@
 
 #include "core/timeline.h"
 
+#include <QHash>
 #include <QImage>
 #include <QSize>
+#include <QVector>
 #include <QWidget>
 
 class QVideoSink;
 class QVideoFrame;
+class QPainter;
 
 namespace spotlight {
 
-// Displays video frames (from a QVideoSink) or a still image letterboxed into
-// a canvas of the sequence's aspect ratio. Applies the clip's colour
-// adjustment and fade so the preview matches the export, and keeps the last
-// full-resolution frame for "Capture Frame".
+// One clip's picture as shown by the compositor.
+struct ViewLayer {
+    int slot = -1;        // frames come from sinkFor(slot) unless `still` is set
+    QImage still;         // stills and titles
+    Clip clip;            // look, transform, key, motion
+    double progress = 0;  // 0..1 through the clip (Ken Burns motion)
+    double alpha = 1.0;   // fade envelope
+};
+
+// A video track at the current time: its clip and, during a transition, the
+// outgoing clip it is transitioning from.
+struct ViewTrack {
+    ViewLayer layer;
+    bool inTransition = false;
+    ViewLayer outgoing;
+    QString transition;          // xfade id
+    double transitionProgress = 0; // 0 = all outgoing, 1 = all incoming
+};
+
+// Displays video. In simple mode (Source Monitor) it shows one sink's frames
+// or a still letterboxed into the canvas. In compositing mode (Program
+// Monitor) it stacks the given tracks bottom to top over black, applying each
+// clip's look, chroma key, crop, transform, motion, fade and transitions with
+// the same geometry as the exporter, so the preview matches the export.
 class VideoView : public QWidget {
     Q_OBJECT
 public:
     explicit VideoView(QWidget *parent = nullptr);
 
-    QVideoSink *videoSink() const { return m_sink; }
+    // Simple-mode sink (slot 0).
+    QVideoSink *videoSink() const { return sinkFor(0); }
+    // Sink feeding a compositor slot (created on demand).
+    QVideoSink *sinkFor(int slot) const;
 
-    // Aspect of the output canvas (e.g. 1920x1080). Empty = fit the frame.
+    // Size of the output canvas (e.g. 1920x1080). Empty = fit the frame.
     void setCanvasSize(const QSize &size);
 
+    // Simple mode.
     void setStillImage(const QImage &img);
     void showBlack();
-    void setAdjust(const ColorAdjust &adjust, double fadeLevel);
     void setPlaceholderText(const QString &text);
+
+    // Compositing mode.
+    void setTracks(const QVector<ViewTrack> &tracks);
+
     // Rule-of-thirds plus title-safe (90%) and action-safe (95%) frames.
     void setGuidesVisible(bool on)
     {
@@ -36,29 +66,43 @@ public:
         update();
     }
 
-    // Last displayed frame at source resolution (null if nothing shown).
-    QImage currentFrame() const { return m_frame; }
+    // What the view shows, rendered at the canvas size (full resolution):
+    // the composite in compositing mode, the last frame in simple mode.
+    QImage currentFrame() const;
 
     QSize sizeHint() const override { return {640, 360}; }
 
+    // Draws the tracks onto a painter whose coordinate system is the output
+    // canvas in pixels scaled by `scale` (used for display and capture).
+    void composite(QPainter &p, const QSize &canvas, double scale, bool forDisplay) const;
+
 protected:
     void paintEvent(QPaintEvent *) override;
-    void resizeEvent(QResizeEvent *) override;
 
 private:
-    void onFrame(const QVideoFrame &frame);
+    void onFrame(int slot, const QVideoFrame &frame);
     QRect canvasRect() const;
-    QRect frameRect(const QRect &canvas) const;
+    QImage frameFor(const ViewLayer &l) const;
+    // The layer's picture after flip, colour and key, at roughly `target`
+    // pixels (cached for display).
+    QImage processed(const ViewLayer &l, const QSize &target, bool cache) const;
+    void drawLayer(QPainter &p, const ViewLayer &l, const QSize &canvas, double scale, bool forDisplay) const;
+    void drawTransition(QPainter &p, const ViewTrack &t, const QSize &canvas, double scale, bool forDisplay) const;
 
-    QVideoSink *m_sink;
-    QImage m_frame;
-    QImage m_display; // scaled + adjusted, cached
-    bool m_dirty = true;
+    mutable QHash<int, QVideoSink *> m_sinks;
+    QHash<int, QImage> m_frames;
+    QHash<int, quint64> m_serial;
     QSize m_canvas;
-    ColorAdjust m_adjust;
-    double m_fade = 1.0;
     QString m_placeholder;
     bool m_guides = false;
+    bool m_compositing = false;
+    QVector<ViewTrack> m_tracks;
+
+    struct CacheEntry {
+        QString key;
+        QImage image;
+    };
+    mutable QHash<QString, CacheEntry> m_cache; // per layer identity
 };
 
 } // namespace spotlight

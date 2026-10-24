@@ -196,28 +196,6 @@ int even(double v)
     return std::max(2, int(std::lround(v / 2.0)) * 2);
 }
 
-// Index of the clip on the same track that ends exactly where `c` starts.
-const Clip *previousAdjacent(const Track &t, const Clip &c)
-{
-    for (const Clip &o : t.clips) {
-        if (o.id != c.id && std::abs(o.end() - c.start) <= kUsPerMs)
-            return &o;
-    }
-    return nullptr;
-}
-
-// Transition into `c` with its duration clamped to what fits, or none.
-Transition effectiveTransition(const Track &t, const Clip &c)
-{
-    Transition tr = c.transition;
-    if (tr.isNone() || !previousAdjacent(t, c))
-        return {};
-    tr.duration = std::min(tr.duration, c.duration() - kUsPerMs);
-    if (tr.duration < kMinClipDuration)
-        return {};
-    return tr;
-}
-
 // Renders one clip as a full-frame, transparent-background piece lasting
 // clip duration + `tail` (extra time used by a transition into the next
 // clip). Returns the output label.
@@ -372,9 +350,9 @@ QString Exporter::buildVideoTrack(GraphBuilder &g, const ProjectData &d, const T
             ++g.pieceCount;
             pieces.append({gap, cursor, {}});
         }
-        const Transition in = effectiveTransition(t, c);
+        const Transition in = timeline::effectiveTransition(t, c);
         const Clip *next = i + 1 < t.clips.size() ? &t.clips[i + 1] : nullptr;
-        const Transition nextIn = next ? effectiveTransition(t, *next) : Transition();
+        const Transition nextIn = next ? timeline::effectiveTransition(t, *next) : Transition();
         const TimeUs tail = nextIn.isNone() ? 0 : nextIn.duration;
         QString label;
         if (m) {

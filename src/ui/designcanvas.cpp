@@ -75,11 +75,21 @@ void DesignCanvas::paintEvent(QPaintEvent *)
     const QRectF canvasRect = vt.mapRect(QRectF(QPointF(0, 0), QSizeF(doc().canvasSize)));
     p.fillRect(canvasRect.translated(4, 6), QColor(0, 0, 0, 120));
 
-    p.save();
-    p.setTransform(vt);
-    p.setClipRect(QRectF(QPointF(0, 0), QSizeF(doc().canvasSize)));
-    m_renderer.render(p, doc());
-    p.restore();
+    // Render through an offscreen buffer at display resolution so blend
+    // modes composite the same way as in the exported image.
+    {
+        const qreal dpr = devicePixelRatioF();
+        const QSize px = (canvasRect.size() * dpr).toSize().expandedTo(QSize(1, 1));
+        QImage buf(px, QImage::Format_ARGB32_Premultiplied);
+        buf.fill(Qt::transparent);
+        QPainter bp(&buf);
+        bp.setRenderHint(QPainter::Antialiasing);
+        bp.scale(px.width() / double(doc().canvasSize.width()), px.height() / double(doc().canvasSize.height()));
+        m_renderer.render(bp, doc());
+        bp.end();
+        buf.setDevicePixelRatio(dpr);
+        p.drawImage(canvasRect.topLeft(), buf);
+    }
 
     if (m_guides) {
         const double cw = doc().canvasSize.width();
@@ -123,12 +133,49 @@ void DesignCanvas::paintEvent(QPaintEvent *)
                QStringLiteral("%1 × %2").arg(doc().canvasSize.width()).arg(doc().canvasSize.height()));
 }
 
+void DesignCanvas::setBrush(bool enabled, const QColor &color, double width, bool eraser)
+{
+    m_brush = enabled;
+    m_brushColor = color;
+    m_brushWidth = width;
+    m_eraser = eraser;
+    setCursor(enabled ? Qt::CrossCursor : Qt::ArrowCursor);
+}
+
 void DesignCanvas::mousePressEvent(QMouseEvent *e)
 {
     if (e->button() != Qt::LeftButton)
         return;
     const QPointF cpos = toCanvas(e->position());
     m_pressCanvas = cpos;
+
+    if (m_brush) {
+        m_preview = m_project->data().design;
+        m_previewActive = true;
+        DesignLayer *target = m_preview.layer(m_selected);
+        if (!target || target->type != LayerType::Drawing || target->locked) {
+            DesignLayer l;
+            l.id = QUuid::createUuid();
+            l.type = LayerType::Drawing;
+            l.name = tr("Drawing");
+            l.shapeSize = m_preview.canvasSize;
+            l.outlineWidth = 0;
+            m_preview.layers.append(l);
+            target = &m_preview.layers.last();
+            m_selected = l.id;
+            emit selectionChanged(m_selected);
+        }
+        BrushStroke st;
+        st.color = m_brushColor;
+        st.width = m_brushWidth / std::max(0.01, target->scale);
+        st.eraser = m_eraser;
+        st.points.append(m_renderer.layerTransform(*target).inverted().map(cpos));
+        target->strokes.append(st);
+        m_orig = *target;
+        m_drag = Drag::Paint;
+        update();
+        return;
+    }
 
     if (const DesignLayer *sel = doc().layer(m_selected)) {
         if (handleRect(*sel).contains(e->position())) {
@@ -147,6 +194,17 @@ void DesignCanvas::mousePressEvent(QMouseEvent *e)
 
 void DesignCanvas::mouseMoveEvent(QMouseEvent *e)
 {
+    if (m_drag == Drag::Paint) {
+        if (DesignLayer *l = m_preview.layer(m_orig.id); l && !l->strokes.isEmpty()) {
+            const QPointF pt = m_renderer.layerTransform(*l).inverted().map(toCanvas(e->position()));
+            if (l->strokes.last().points.isEmpty() || QLineF(l->strokes.last().points.last(), pt).length() > 1.5)
+                l->strokes.last().points.append(pt);
+            update();
+        }
+        return;
+    }
+    if (m_brush)
+        return;
     if (m_drag == Drag::None) {
         const DesignLayer *sel = doc().layer(m_selected);
         if (sel && handleRect(*sel).contains(e->position()))
@@ -198,7 +256,8 @@ void DesignCanvas::mouseReleaseEvent(QMouseEvent *)
     if (m_previewActive) {
         const DesignDocument result = m_preview;
         m_previewActive = false;
-        m_project->edit(m_drag == Drag::Scale ? tr("Scale Layer") : tr("Move Layer"),
+        m_project->edit(m_drag == Drag::Paint ? tr("Brush Stroke")
+                                              : (m_drag == Drag::Scale ? tr("Scale Layer") : tr("Move Layer")),
                         [&](ProjectData &d) { d.design = result; });
     }
     m_drag = Drag::None;

@@ -10,6 +10,7 @@
 #include <functional>
 
 class QScrollBar;
+class QMenu;
 
 namespace spotlight {
 
@@ -31,6 +32,10 @@ public:
 
     using ThumbnailProvider = std::function<QImage(const QString &path)>;
     void setThumbnailProvider(ThumbnailProvider provider) { m_thumbs = std::move(provider); }
+    // Lets the main window add tool actions (freeze frame, reverse…) to the
+    // clip context menu.
+    using MenuExtender = std::function<void(QMenu *menu, const QUuid &clipId)>;
+    void setClipMenuExtender(MenuExtender fn) { m_menuExtender = std::move(fn); }
 
     TimeUs playhead() const { return m_playhead; }
     QVector<QUuid> selection() const { return m_selection; }
@@ -103,6 +108,7 @@ private:
     Project *m_project;
     Mode m_mode;
     ThumbnailProvider m_thumbs;
+    MenuExtender m_menuExtender;
     QScrollBar *m_hbar;
     QScrollBar *m_vbar;
 

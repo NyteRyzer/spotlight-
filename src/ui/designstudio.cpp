@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QFontComboBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QImageReader>
 #include <QLabel>
 #include <QListWidget>
@@ -80,10 +81,15 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     shapeBtn->setText(tr("Shape"));
     shapeBtn->setPopupMode(QToolButton::InstantPopup);
     auto *shapeMenu = new QMenu(shapeBtn);
-    shapeMenu->addAction(tr("Rectangle"), this, [this] { addShape(ShapeKind::Rectangle); });
-    shapeMenu->addAction(tr("Ellipse"), this, [this] { addShape(ShapeKind::Ellipse); });
+    const QStringList shapeNames = shapeKindNames();
+    for (int i = 0; i < shapeNames.size(); ++i)
+        shapeMenu->addAction(tr(qPrintable(shapeNames[i])), this, [this, i] { addShape(ShapeKind(i)); });
     shapeBtn->setMenu(shapeMenu);
     tb->addWidget(shapeBtn);
+    m_brushAct = tb->addAction(tr("Brush"));
+    m_brushAct->setCheckable(true);
+    m_brushAct->setToolTip(tr("Paint freehand strokes onto a drawing layer"));
+    connect(m_brushAct, &QAction::toggled, this, [this] { updateBrush(); });
     tb->addAction(tr("Use Video Frame"), this, &DesignStudio::requestVideoFrame)
         ->setToolTip(tr("Grab the current Program Monitor frame as a new layer"));
     auto *templateBtn = new QToolButton(this);
@@ -183,6 +189,50 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     common->addRow(tr("Opacity"), m_opacity);
     common->addRow(tr("Scale"), m_scale);
     common->addRow(tr("Rotation"), m_rotation);
+    auto *blend = new QComboBox(m_commonProps);
+    for (const auto &n : blendModeNames())
+        blend->addItem(tr(qPrintable(n)));
+    blend->setToolTip(tr("How this layer mixes with the layers below"));
+    common->addRow(tr("Blend"), blend);
+    connect(blend, &QComboBox::activated, this,
+            [this](int i) { editLayer(QString(), [i](DesignLayer &l) { l.blend = BlendMode(i); }); });
+    m_layerRefreshers << [blend](const DesignLayer &l) { blend->setCurrentIndex(int(l.blend)); };
+    auto *flags = new QWidget(m_commonProps);
+    auto *fh = new QHBoxLayout(flags);
+    fh->setContentsMargins(0, 0, 0, 0);
+    auto *flipH = new QCheckBox(tr("Flip H"), flags);
+    auto *flipV = new QCheckBox(tr("Flip V"), flags);
+    auto *lock = new QCheckBox(tr("Lock"), flags);
+    lock->setToolTip(tr("Locked layers can't be selected or moved on the canvas"));
+    fh->addWidget(flipH);
+    fh->addWidget(flipV);
+    fh->addWidget(lock);
+    common->addRow(flags);
+    connect(flipH, &QCheckBox::toggled, this, [this](bool v) { editLayer(QString(), [v](DesignLayer &l) { l.flipH = v; }); });
+    connect(flipV, &QCheckBox::toggled, this, [this](bool v) { editLayer(QString(), [v](DesignLayer &l) { l.flipV = v; }); });
+    connect(lock, &QCheckBox::toggled, this, [this](bool v) { editLayer(QString(), [v](DesignLayer &l) { l.locked = v; }); });
+    m_layerRefreshers << [flipH, flipV, lock](const DesignLayer &l) {
+        flipH->setChecked(l.flipH);
+        flipV->setChecked(l.flipV);
+        lock->setChecked(l.locked);
+    };
+    auto *align = new QWidget(m_commonProps);
+    auto *ah = new QHBoxLayout(align);
+    ah->setContentsMargins(0, 0, 0, 0);
+    ah->setSpacing(2);
+    const QStringList alignTips{tr("Align left"),   tr("Center horizontally"), tr("Align right"),
+                                tr("Align top"),    tr("Center vertically"),   tr("Align bottom")};
+    const QStringList alignGlyphs{QStringLiteral("⇤"), QStringLiteral("↔"), QStringLiteral("⇥"),
+                                  QStringLiteral("⤒"), QStringLiteral("↕"), QStringLiteral("⤓")};
+    for (int i = 0; i < 6; ++i) {
+        auto *b = new QToolButton(align);
+        b->setText(alignGlyphs[i]);
+        b->setToolTip(alignTips[i]);
+        ah->addWidget(b);
+        connect(b, &QToolButton::clicked, this, [this, i] { alignSelected(i); });
+    }
+    ah->addStretch();
+    common->addRow(tr("Align"), align);
     pl->addWidget(m_commonProps);
 
     m_typePages = new QStackedWidget(m_props);
@@ -195,6 +245,35 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     imgForm->addRow(tr("Brightness"), m_imgBrightness);
     imgForm->addRow(tr("Contrast"), m_imgContrast);
     imgForm->addRow(tr("Saturation"), m_imgSaturation);
+    bindSlider(imgForm, tr("Hue"), -180, 180, 1, [](const DesignLayer &l) { return l.hue; },
+               [](DesignLayer &l, double v) { l.hue = v; });
+    bindSlider(imgForm, tr("Blur"), 0, 40, 1, [](const DesignLayer &l) { return l.blur; },
+               [](DesignLayer &l, double v) { l.blur = v; });
+    bindCheck(imgForm, tr("Black & white"), [](const DesignLayer &l) { return l.grayscale; },
+              [](DesignLayer &l, bool v) { l.grayscale = v; });
+    bindCheck(imgForm, tr("Invert colors"), [](const DesignLayer &l) { return l.invert; },
+              [](DesignLayer &l, bool v) { l.invert = v; });
+    bindCheck(imgForm, tr("Remove background"), [](const DesignLayer &l) { return l.removeBg; },
+              [](DesignLayer &l, bool v) { l.removeBg = v; })
+        ->setToolTip(tr("Removes a solid or studio backdrop connected to the image edges"));
+    bindSlider(imgForm, tr("BG tolerance"), 1, 60, 0.01, [](const DesignLayer &l) { return l.removeBgTolerance; },
+               [](DesignLayer &l, double v) { l.removeBgTolerance = v; });
+    bindSlider(imgForm, tr("Crop left"), 0, 90, 0.01, [](const DesignLayer &l) { return l.cropLeft; },
+               [](DesignLayer &l, double v) { l.cropLeft = v; });
+    bindSlider(imgForm, tr("Crop right"), 0, 90, 0.01, [](const DesignLayer &l) { return l.cropRight; },
+               [](DesignLayer &l, double v) { l.cropRight = v; });
+    bindSlider(imgForm, tr("Crop top"), 0, 90, 0.01, [](const DesignLayer &l) { return l.cropTop; },
+               [](DesignLayer &l, double v) { l.cropTop = v; });
+    bindSlider(imgForm, tr("Crop bottom"), 0, 90, 0.01, [](const DesignLayer &l) { return l.cropBottom; },
+               [](DesignLayer &l, double v) { l.cropBottom = v; });
+    auto *fadeDir = new QComboBox(imgPage);
+    fadeDir->addItems({tr("Fade to bottom"), tr("Fade to top"), tr("Fade to right"), tr("Fade to left")});
+    imgForm->addRow(tr("Fade mask"), fadeDir);
+    connect(fadeDir, &QComboBox::activated, this,
+            [this](int i) { editLayer(QString(), [i](DesignLayer &l) { l.fadeDirection = i; }); });
+    m_layerRefreshers << [fadeDir](const DesignLayer &l) { fadeDir->setCurrentIndex(std::clamp(l.fadeDirection, 0, 3)); };
+    bindSlider(imgForm, tr("Fade amount"), 0, 100, 0.01, [](const DesignLayer &l) { return l.fadeAmount; },
+               [](DesignLayer &l, double v) { l.fadeAmount = v; });
     m_typePages->addWidget(imgPage);
     // Text page
     auto *textPage = new QWidget(m_typePages);
@@ -219,12 +298,29 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
                      colorButton(QStringLiteral("outlineColor"), [](const DesignLayer &l) { return l.outlineColor; },
                                  [](DesignLayer &l, const QColor &c) { l.outlineColor = c; }));
     textForm->addRow(QString(), m_shadow);
+    bindCheck(textForm, tr("Italic"), [](const DesignLayer &l) { return l.italic; },
+              [](DesignLayer &l, bool v) { l.italic = v; });
+    auto *textAlign = new QComboBox(textPage);
+    textAlign->addItems({tr("Left"), tr("Center"), tr("Right")});
+    textForm->addRow(tr("Alignment"), textAlign);
+    connect(textAlign, &QComboBox::activated, this, [this](int i) { editLayer(QString(), [i](DesignLayer &l) { l.align = i; }); });
+    m_layerRefreshers << [textAlign](const DesignLayer &l) { textAlign->setCurrentIndex(l.align); };
+    bindSlider(textForm, tr("Letter spacing"), -10, 60, 1, [](const DesignLayer &l) { return l.letterSpacing; },
+               [](DesignLayer &l, double v) { l.letterSpacing = v; });
+    bindSlider(textForm, tr("Line height"), 50, 250, 0.01, [](const DesignLayer &l) { return l.lineHeight; },
+               [](DesignLayer &l, double v) { l.lineHeight = v; });
+    bindCheck(textForm, tr("Background box"), [](const DesignLayer &l) { return l.textBox; },
+              [](DesignLayer &l, bool v) { l.textBox = v; });
+    textForm->addRow(tr("Box color"),
+                     colorButton(QStringLiteral("textBoxColor"), [](const DesignLayer &l) { return l.textBoxColor; },
+                                 [](DesignLayer &l, const QColor &c) { l.textBoxColor = c; }));
     m_typePages->addWidget(textPage);
     // Shape page
     auto *shapePage = new QWidget(m_typePages);
     auto *shapeForm = new QFormLayout(shapePage);
     m_shapeKind = new QComboBox(shapePage);
-    m_shapeKind->addItems({tr("Rectangle"), tr("Ellipse")});
+    for (const auto &n : shapeKindNames())
+        m_shapeKind->addItem(tr(qPrintable(n)));
     m_shapeW = new QSpinBox(shapePage);
     m_shapeH = new QSpinBox(shapePage);
     m_shapeW->setRange(1, 10000);
@@ -247,7 +343,88 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
                                   [](DesignLayer &l, const QColor &c) { l.fillColor2 = c; }));
     shapeForm->addRow(tr("Angle"), m_gradientAngle);
     m_typePages->addWidget(shapePage);
+    // Drawing page
+    auto *drawPage = new QWidget(m_typePages);
+    auto *drawForm = new QFormLayout(drawPage);
+    auto *drawInfo = new QLabel(tr("Turn on the Brush in the toolbar and paint on the canvas."), drawPage);
+    drawInfo->setWordWrap(true);
+    drawForm->addRow(drawInfo);
+    auto *clearDrawing = new QPushButton(tr("Clear Drawing"), drawPage);
+    drawForm->addRow(clearDrawing);
+    connect(clearDrawing, &QPushButton::clicked, this,
+            [this] { editLayer(QString(), [](DesignLayer &l) { l.strokes.clear(); }); });
+    auto *undoStroke = new QPushButton(tr("Remove Last Stroke"), drawPage);
+    drawForm->addRow(undoStroke);
+    connect(undoStroke, &QPushButton::clicked, this, [this] {
+        editLayer(QString(), [](DesignLayer &l) {
+            if (!l.strokes.isEmpty())
+                l.strokes.removeLast();
+        });
+    });
+    m_typePages->addWidget(drawPage);
     pl->addWidget(m_typePages);
+
+    // Effects (every layer type)
+    m_effectsProps = new QWidget(m_props);
+    auto *fx = new QFormLayout(m_effectsProps);
+    fx->setContentsMargins(0, 0, 0, 0);
+    auto *fxTitle = new QLabel(tr("Effects"), m_effectsProps);
+    QFont fxf = fxTitle->font();
+    fxf.setBold(true);
+    fxTitle->setFont(fxf);
+    fxTitle->setStyleSheet(QStringLiteral("color: #ffc400; margin-top: 6px;"));
+    fx->addRow(fxTitle);
+    bindCheck(fx, tr("Drop shadow"), [](const DesignLayer &l) { return l.dropShadow; },
+              [](DesignLayer &l, bool v) { l.dropShadow = v; });
+    fx->addRow(tr("Shadow color"), colorButton(QStringLiteral("shadowColor"), [](const DesignLayer &l) { return l.shadowColor; },
+                                               [](DesignLayer &l, const QColor &c) { l.shadowColor = c; }));
+    bindSlider(fx, tr("Shadow blur"), 0, 60, 1, [](const DesignLayer &l) { return l.shadowBlur; },
+               [](DesignLayer &l, double v) { l.shadowBlur = v; });
+    bindSlider(fx, tr("Shadow distance"), 0, 80, 1, [](const DesignLayer &l) { return l.shadowDistance; },
+               [](DesignLayer &l, double v) { l.shadowDistance = v; });
+    bindSlider(fx, tr("Shadow angle"), -180, 180, 1, [](const DesignLayer &l) { return l.shadowAngle; },
+               [](DesignLayer &l, double v) { l.shadowAngle = v; });
+    bindCheck(fx, tr("Outer glow"), [](const DesignLayer &l) { return l.glow; }, [](DesignLayer &l, bool v) { l.glow = v; });
+    fx->addRow(tr("Glow color"), colorButton(QStringLiteral("glowColor"), [](const DesignLayer &l) { return l.glowColor; },
+                                             [](DesignLayer &l, const QColor &c) { l.glowColor = c; }));
+    bindSlider(fx, tr("Glow size"), 1, 80, 1, [](const DesignLayer &l) { return l.glowSize; },
+               [](DesignLayer &l, double v) { l.glowSize = v; });
+    bindSlider(fx, tr("Stroke"), 0, 40, 1, [](const DesignLayer &l) { return l.strokeWidth; },
+               [](DesignLayer &l, double v) { l.strokeWidth = v; })
+        ->setToolTip(tr("Outline around the layer — try it on a cut-out photo"));
+    fx->addRow(tr("Stroke color"), colorButton(QStringLiteral("strokeColor"), [](const DesignLayer &l) { return l.strokeColor; },
+                                               [](DesignLayer &l, const QColor &c) { l.strokeColor = c; }));
+    pl->addWidget(m_effectsProps);
+
+    // Brush settings
+    auto *brushBox = new QWidget(m_props);
+    auto *bf = new QFormLayout(brushBox);
+    bf->setContentsMargins(0, 0, 0, 0);
+    auto *brushTitle = new QLabel(tr("Brush"), brushBox);
+    brushTitle->setFont(fxf);
+    brushTitle->setStyleSheet(QStringLiteral("color: #ffc400; margin-top: 6px;"));
+    bf->addRow(brushTitle);
+    m_brushColorBtn = new QPushButton(brushBox);
+    setSwatch(m_brushColorBtn, m_brushColor);
+    bf->addRow(tr("Color"), m_brushColorBtn);
+    connect(m_brushColorBtn, &QPushButton::clicked, this, [this] {
+        const QColor c = QColorDialog::getColor(m_brushColor, this, tr("Brush Color"), QColorDialog::ShowAlphaChannel);
+        if (c.isValid()) {
+            m_brushColor = c;
+            setSwatch(m_brushColorBtn, c);
+            updateBrush();
+        }
+    });
+    m_brushSize = new QDoubleSpinBox(brushBox);
+    m_brushSize->setRange(1, 300);
+    m_brushSize->setValue(14);
+    m_brushSize->setSuffix(QStringLiteral(" px"));
+    bf->addRow(tr("Size"), m_brushSize);
+    connect(m_brushSize, &QDoubleSpinBox::valueChanged, this, [this] { updateBrush(); });
+    m_eraser = new QCheckBox(tr("Eraser"), brushBox);
+    bf->addRow(m_eraser);
+    connect(m_eraser, &QCheckBox::toggled, this, [this] { updateBrush(); });
+    pl->addWidget(brushBox);
     pl->addStretch();
 
     // Layers and properties share one dock, split vertically.
@@ -305,7 +482,7 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     connect(m_shadow, &QCheckBox::toggled, this,
             [this](bool v) { editLayer(QString(), [v](DesignLayer &l) { l.shadow = v; }); });
     connect(m_shapeKind, &QComboBox::currentIndexChanged, this, [this](int i) {
-        editLayer(QString(), [i](DesignLayer &l) { l.shape = i == 1 ? ShapeKind::Ellipse : ShapeKind::Rectangle; });
+        editLayer(QString(), [i](DesignLayer &l) { l.shape = ShapeKind(i); });
     });
     connect(m_shapeW, &QSpinBox::valueChanged, this,
             [this](int v) { editLayer(QStringLiteral("w"), [v](DesignLayer &l) { l.shapeSize.setWidth(v); }); });
@@ -390,12 +567,15 @@ void DesignStudio::rebuildLayers()
         case LayerType::Image: prefix = QStringLiteral("▣  "); break;
         case LayerType::Text: prefix = QStringLiteral("T  "); break;
         case LayerType::Shape: prefix = QStringLiteral("■  "); break;
+        case LayerType::Drawing: prefix = QStringLiteral("✎  "); break;
         }
         auto *item = new QListWidgetItem(l.name.isEmpty() ? prefix + layerTypeToString(l.type) : l.name, m_layers);
         item->setData(Qt::UserRole, l.id.toString());
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
         item->setCheckState(l.visible ? Qt::Checked : Qt::Unchecked);
         item->setToolTip(tr("Checkbox: visibility · Double-click: rename"));
+        if (l.locked)
+            item->setText(QStringLiteral("🔒 ") + item->text());
         if (l.id == m_canvas->selectedLayer())
             m_layers->setCurrentItem(item);
     }
@@ -421,6 +601,7 @@ void DesignStudio::refreshProperties()
     m_props->setEnabled(l != nullptr);
     m_typePages->setVisible(l != nullptr);
     m_commonProps->setVisible(l != nullptr);
+    m_effectsProps->setVisible(l != nullptr);
     if (!l) {
         m_propsTitle->setText(tr("Select a layer on the canvas"));
         return;
@@ -450,16 +631,21 @@ void DesignStudio::refreshProperties()
         break;
     case LayerType::Shape:
         m_typePages->setCurrentIndex(2);
-        m_shapeKind->setCurrentIndex(l->shape == ShapeKind::Ellipse ? 1 : 0);
+        m_shapeKind->setCurrentIndex(int(l->shape));
         m_shapeW->setValue(l->shapeSize.width());
         m_shapeH->setValue(l->shapeSize.height());
         m_radius->setValue(l->cornerRadius);
         m_gradient->setChecked(l->gradient);
         m_gradientAngle->setValue(l->gradientAngle);
         break;
+    case LayerType::Drawing:
+        m_typePages->setCurrentIndex(3);
+        break;
     }
     for (const auto &r : m_colorRefreshers)
         r();
+    for (const auto &r : m_layerRefreshers)
+        r(*l);
     m_updating = false;
 }
 
@@ -529,9 +715,26 @@ void DesignStudio::addShape(ShapeKind kind)
     l.id = QUuid::createUuid();
     l.type = LayerType::Shape;
     l.shape = kind;
-    l.name = kind == ShapeKind::Ellipse ? tr("Ellipse") : tr("Rectangle");
+    l.name = tr(qPrintable(shapeKindNames().value(int(kind))));
+    l.outlineWidth = 0;
     const QSize canvas = m_project->data().design.canvasSize;
-    l.shapeSize = QSize(canvas.width() / 3, kind == ShapeKind::Ellipse ? canvas.width() / 3 : canvas.height() / 5);
+    switch (kind) {
+    case ShapeKind::Ellipse:
+    case ShapeKind::Star:
+    case ShapeKind::Triangle:
+        l.shapeSize = QSize(canvas.height() / 3, canvas.height() / 3);
+        break;
+    case ShapeKind::Arrow:
+        l.shapeSize = QSize(canvas.width() / 4, canvas.height() / 6);
+        break;
+    case ShapeKind::Line:
+        l.shapeSize = QSize(canvas.width() / 3, std::max(4, canvas.height() / 60));
+        l.fillColor = Qt::white;
+        break;
+    case ShapeKind::Rectangle:
+        l.shapeSize = QSize(canvas.width() / 3, canvas.height() / 5);
+        break;
+    }
     l.position = QPointF((canvas.width() - l.shapeSize.width()) / 2.0, (canvas.height() - l.shapeSize.height()) / 2.0);
     m_project->edit(tr("Add Shape"), [&](ProjectData &d) { d.design.layers.append(l); });
     m_canvas->setSelectedLayer(l.id);
@@ -627,6 +830,68 @@ void DesignStudio::pasteLayer(const DesignLayer &layer)
 QImage DesignStudio::renderImage()
 {
     return m_canvas->renderer()->renderToImage(m_project->data().design);
+}
+
+QSlider *DesignStudio::bindSlider(QFormLayout *form, const QString &label, int min, int max, double scale,
+                                  std::function<double(const DesignLayer &)> get,
+                                  std::function<void(DesignLayer &, double)> set)
+{
+    auto *row = new QWidget(m_props);
+    auto *h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    auto *s = hslider(min, max, row);
+    auto *value = new QLabel(row);
+    value->setMinimumWidth(38);
+    value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    value->setStyleSheet(QStringLiteral("color: #b0b0bc;"));
+    h->addWidget(s, 1);
+    h->addWidget(value);
+    form->addRow(label, row);
+    auto show = [value, scale](int v) { value->setText(QString::number(v * scale, 'f', scale < 1 ? 2 : 0)); };
+    connect(s, &QSlider::valueChanged, this, [this, scale, set, show, label](int v) {
+        show(v);
+        editLayer(label, [&](DesignLayer &l) { set(l, v * scale); });
+    });
+    m_layerRefreshers << [s, scale, get, show](const DesignLayer &l) {
+        s->setValue(int(std::lround(get(l) / scale)));
+        show(s->value());
+    };
+    return s;
+}
+
+QCheckBox *DesignStudio::bindCheck(QFormLayout *form, const QString &label, std::function<bool(const DesignLayer &)> get,
+                                   std::function<void(DesignLayer &, bool)> set)
+{
+    auto *cb = new QCheckBox(label, m_props);
+    form->addRow(QString(), cb);
+    connect(cb, &QCheckBox::toggled, this, [this, set](bool v) { editLayer(QString(), [&](DesignLayer &l) { set(l, v); }); });
+    m_layerRefreshers << [cb, get](const DesignLayer &l) { cb->setChecked(get(l)); };
+    return cb;
+}
+
+void DesignStudio::alignSelected(int how)
+{
+    editLayer(QString(), [this, how](DesignLayer &l) {
+        const QSizeF c = m_project->data().design.canvasSize;
+        // Align the layer's on-canvas bounding box (accounts for rotation).
+        const QRectF b = m_canvas->renderer()->canvasPolygon(l).boundingRect();
+        QPointF d;
+        switch (how) {
+        case 0: d.setX(-b.left()); break;
+        case 1: d.setX(c.width() / 2 - b.center().x()); break;
+        case 2: d.setX(c.width() - b.right()); break;
+        case 3: d.setY(-b.top()); break;
+        case 4: d.setY(c.height() / 2 - b.center().y()); break;
+        default: d.setY(c.height() - b.bottom()); break;
+        }
+        l.position += d;
+    });
+}
+
+void DesignStudio::updateBrush()
+{
+    m_canvas->setBrush(m_brushAct && m_brushAct->isChecked(), m_brushColor, m_brushSize ? m_brushSize->value() : 14,
+                       m_eraser && m_eraser->isChecked());
 }
 
 void DesignStudio::setGuidesVisible(bool visible)

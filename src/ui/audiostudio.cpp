@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QDockWidget>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -76,7 +77,7 @@ ChannelStrip::ChannelStrip(Project *project, const QUuid &trackId, QWidget *pare
     layout->addWidget(m_name);
 
     m_fx->setText(tr("FX"));
-    m_fx->setToolTip(tr("Edit EQ, compressor and cleanup for this track"));
+    m_fx->setToolTip(tr("Edit this track's effects: cleanup, EQ, compressor, voice changer, reverb, ducking"));
     layout->addWidget(m_fx, 0, Qt::AlignHCenter);
 
     m_pan->setRange(-100, 100);
@@ -130,7 +131,6 @@ void ChannelStrip::refresh()
         return;
     const Track &t = m_project->data().tracks[i];
     m_updating = true;
-    m_name->setText(t.name);
     if (!m_volume->isSliderDown())
         m_volume->setValue(int(std::lround(linearToDb(t.volume) * 10)));
     m_db->setText(t.volume <= 0 ? QStringLiteral("-∞ dB") : QStringLiteral("%1 dB").arg(linearToDb(t.volume), 0, 'f', 1));
@@ -138,7 +138,9 @@ void ChannelStrip::refresh()
         m_pan->setValue(int(std::lround(t.pan * 100)));
     m_mute->setChecked(t.muted);
     m_solo->setChecked(t.solo);
-    m_fx->setStyleSheet(t.fx.isNeutral() ? QString() : QStringLiteral("color: #ffc400; font-weight: bold;"));
+    m_fx->setStyleSheet(t.fx.isNeutral() && !t.fx.duckUnderVoice ? QString()
+                                                                  : QStringLiteral("color: #ffc400; font-weight: bold;"));
+    m_name->setText(t.voice ? QStringLiteral("🎙 %1").arg(t.name) : t.name);
     m_updating = false;
 }
 
@@ -148,56 +150,211 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
     : QWidget(parent)
     , m_project(project)
     , m_title(new QLabel(this))
-    , m_cleanup(new QCheckBox(tr("Dialogue cleanup (rumble + noise reduction)"), this))
-    , m_eq(new QGroupBox(tr("3-Band EQ"), this))
-    , m_low(new QSlider(Qt::Horizontal, this))
-    , m_mid(new QSlider(Qt::Horizontal, this))
-    , m_high(new QSlider(Qt::Horizontal, this))
-    , m_comp(new QGroupBox(tr("Compressor"), this))
-    , m_threshold(new QSlider(Qt::Horizontal, this))
-    , m_ratio(new QSlider(Qt::Horizontal, this))
-    , m_values(new QLabel(this))
+    , m_body(new QWidget(this))
 {
-    auto *layout = new QVBoxLayout(this);
+    auto *outer = new QVBoxLayout(this);
     QFont f = m_title->font();
     f.setBold(true);
     m_title->setFont(f);
-    layout->addWidget(m_title);
-    layout->addWidget(m_cleanup);
+    m_title->setWordWrap(true);
+    outer->addWidget(m_title);
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidget(m_body);
+    outer->addWidget(scroll, 1);
 
-    m_eq->setCheckable(true);
-    auto *eqf = new QFormLayout(m_eq);
-    for (auto *s : {m_low, m_mid, m_high})
-        s->setRange(-120, 120); // tenths of dB
-    eqf->addRow(tr("Low (100 Hz)"), m_low);
-    eqf->addRow(tr("Mid (1 kHz)"), m_mid);
-    eqf->addRow(tr("High (8 kHz)"), m_high);
-    layout->addWidget(m_eq);
+    auto *page = new QVBoxLayout(m_body);
+    auto section = [&](const QString &title) {
+        auto *label = new QLabel(title, m_body);
+        QFont lf = label->font();
+        lf.setBold(true);
+        label->setFont(lf);
+        label->setStyleSheet(QStringLiteral("color: #ffc400; margin-top: 6px;"));
+        page->addWidget(label);
+        auto *form = new QFormLayout;
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        page->addLayout(form);
+        return form;
+    };
 
-    m_comp->setCheckable(true);
-    auto *cf = new QFormLayout(m_comp);
-    m_threshold->setRange(-50, 0);
-    m_ratio->setRange(10, 200); // ratio x10
-    cf->addRow(tr("Threshold"), m_threshold);
-    cf->addRow(tr("Ratio"), m_ratio);
-    layout->addWidget(m_comp);
+    // One-click presets.
+    auto *presets = section(tr("Presets"));
+    auto *presetRow = new QWidget(m_body);
+    auto *grid = new QGridLayout(presetRow);
+    grid->setContentsMargins(0, 0, 0, 0);
+    struct Preset {
+        QString name;
+        QString tip;
+        std::function<void(Track &)> apply;
+    };
+    const QVector<Preset> list{
+        {tr("Podcast Voice"), tr("Cleanup, gate, de-esser, warm EQ, compression and a limiter"),
+         [](Track &t) {
+             AudioFx &x = t.fx;
+             x.dialogueCleanup = x.gateEnabled = x.deEsser = x.eqEnabled = x.compressorEnabled = x.limiterEnabled = true;
+             x.lowGainDb = 2;
+             x.midGainDb = 1.5;
+             x.highGainDb = 2.5;
+             x.thresholdDb = -20;
+             x.ratio = 4;
+             x.limiterCeilingDb = -1;
+             t.voice = true;
+         }},
+        {tr("Music Bed"), tr("Duck under voice tracks and carve room for dialogue"),
+         [](Track &t) {
+             t.fx.duckUnderVoice = true;
+             t.fx.duckAmountDb = -14;
+             t.fx.eqEnabled = true;
+             t.fx.midGainDb = -3;
+             t.voice = false;
+         }},
+        {tr("Deep Voice"), tr("Pitch down 4 semitones"), [](Track &t) { t.fx.pitchSemitones = -4; }},
+        {tr("Chipmunk"), tr("Pitch up 7 semitones"), [](Track &t) { t.fx.pitchSemitones = 7; }},
+        {tr("Big Hall"), tr("Large, wet reverb"),
+         [](Track &t) {
+             t.fx.reverbEnabled = true;
+             t.fx.reverbMix = 0.45;
+             t.fx.reverbSize = 0.9;
+         }},
+        {tr("Clear All"), tr("Remove every effect from this track"), [](Track &t) {
+             t.fx = AudioFx();
+             t.voice = false;
+         }},
+    };
+    for (int i = 0; i < list.size(); ++i) {
+        auto *b = new QToolButton(presetRow);
+        b->setText(list[i].name);
+        b->setToolTip(list[i].tip);
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        grid->addWidget(b, i / 3, i % 3);
+        const auto fn = list[i].apply;
+        connect(b, &QToolButton::clicked, this, [this, fn] { editFx(QString(), fn); });
+    }
+    presets->addRow(presetRow);
 
-    m_values->setWordWrap(true);
-    m_values->setStyleSheet(QStringLiteral("color: #9a9aa6;"));
-    layout->addWidget(m_values);
-    auto *note = new QLabel(tr("Track effects are rendered on export. The preview plays the dry signal."), this);
+    auto *clean = section(tr("Cleanup"));
+    check(clean, tr("Dialogue cleanup (rumble + noise reduction)"), [](const Track &t) { return t.fx.dialogueCleanup; },
+          [](Track &t, bool on) { t.fx.dialogueCleanup = on; });
+    check(clean, tr("Noise gate (mute room tone between words)"), [](const Track &t) { return t.fx.gateEnabled; },
+          [](Track &t, bool on) { t.fx.gateEnabled = on; });
+    slider(clean, tr("Gate threshold"), -70, -15, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.gateThresholdDb; },
+           [](Track &t, double v) { t.fx.gateThresholdDb = v; });
+    check(clean, tr("De-esser (soften harsh “s” sounds)"), [](const Track &t) { return t.fx.deEsser; },
+          [](Track &t, bool on) { t.fx.deEsser = on; });
+
+    auto *eq = section(tr("3-Band EQ"));
+    check(eq, tr("Enable EQ"), [](const Track &t) { return t.fx.eqEnabled; }, [](Track &t, bool on) { t.fx.eqEnabled = on; });
+    slider(eq, tr("Low (100 Hz)"), -120, 120, 0.1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.lowGainDb; },
+           [](Track &t, double v) { t.fx.lowGainDb = v; });
+    slider(eq, tr("Mid (1 kHz)"), -120, 120, 0.1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.midGainDb; },
+           [](Track &t, double v) { t.fx.midGainDb = v; });
+    slider(eq, tr("High (8 kHz)"), -120, 120, 0.1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.highGainDb; },
+           [](Track &t, double v) { t.fx.highGainDb = v; });
+
+    auto *comp = section(tr("Compressor"));
+    check(comp, tr("Enable compressor"), [](const Track &t) { return t.fx.compressorEnabled; },
+          [](Track &t, bool on) { t.fx.compressorEnabled = on; });
+    slider(comp, tr("Threshold"), -50, 0, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.thresholdDb; },
+           [](Track &t, double v) { t.fx.thresholdDb = v; });
+    slider(comp, tr("Ratio"), 10, 200, 0.1, QStringLiteral(":1"), [](const Track &t) { return t.fx.ratio; },
+           [](Track &t, double v) { t.fx.ratio = v; });
+
+    auto *voice = section(tr("Voice Changer"));
+    slider(voice, tr("Pitch"), -12, 12, 1, QStringLiteral(" st"), [](const Track &t) { return t.fx.pitchSemitones; },
+           [](Track &t, double v) { t.fx.pitchSemitones = v; });
+
+    auto *space = section(tr("Space"));
+    check(space, tr("Reverb"), [](const Track &t) { return t.fx.reverbEnabled; },
+          [](Track &t, bool on) { t.fx.reverbEnabled = on; });
+    slider(space, tr("Reverb mix"), 0, 100, 1, QStringLiteral("%"), [](const Track &t) { return t.fx.reverbMix * 100; },
+           [](Track &t, double v) { t.fx.reverbMix = v / 100.0; });
+    slider(space, tr("Room size"), 0, 100, 1, QStringLiteral("%"), [](const Track &t) { return t.fx.reverbSize * 100; },
+           [](Track &t, double v) { t.fx.reverbSize = v / 100.0; });
+    check(space, tr("Echo / delay"), [](const Track &t) { return t.fx.echoEnabled; },
+          [](Track &t, bool on) { t.fx.echoEnabled = on; });
+    slider(space, tr("Delay"), 50, 1500, 1, QStringLiteral(" ms"), [](const Track &t) { return t.fx.echoDelayMs; },
+           [](Track &t, double v) { t.fx.echoDelayMs = v; });
+    slider(space, tr("Feedback"), 0, 90, 1, QStringLiteral("%"), [](const Track &t) { return t.fx.echoFeedback * 100; },
+           [](Track &t, double v) { t.fx.echoFeedback = v / 100.0; });
+
+    auto *out = section(tr("Output"));
+    check(out, tr("Limiter (never clip)"), [](const Track &t) { return t.fx.limiterEnabled; },
+          [](Track &t, bool on) { t.fx.limiterEnabled = on; });
+    slider(out, tr("Ceiling"), -12, 0, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.limiterCeilingDb; },
+           [](Track &t, double v) { t.fx.limiterCeilingDb = v; });
+
+    auto *mix = section(tr("Auto-Ducking"));
+    check(mix, tr("This is a voice track (dialogue, voiceover)"), [](const Track &t) { return t.voice; },
+          [](Track &t, bool on) { t.voice = on; });
+    check(mix, tr("Duck this track under voice tracks"), [](const Track &t) { return t.fx.duckUnderVoice; },
+          [](Track &t, bool on) { t.fx.duckUnderVoice = on; });
+    slider(mix, tr("Duck by"), -30, -3, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.duckAmountDb; },
+           [](Track &t, double v) { t.fx.duckAmountDb = v; });
+
+    auto *note = new QLabel(tr("Ducking, volume and pan play live. The other effects are rendered on export."), m_body);
     note->setWordWrap(true);
     note->setStyleSheet(QStringLiteral("color: #6f6f7a; font-style: italic;"));
-    layout->addWidget(note);
-    layout->addStretch();
+    page->addWidget(note);
+    page->addStretch();
 
-    connect(m_cleanup, &QCheckBox::toggled, this, &TrackFxPanel::apply);
-    connect(m_eq, &QGroupBox::toggled, this, &TrackFxPanel::apply);
-    connect(m_comp, &QGroupBox::toggled, this, &TrackFxPanel::apply);
-    for (auto *s : {m_low, m_mid, m_high, m_threshold, m_ratio})
-        connect(s, &QSlider::valueChanged, this, &TrackFxPanel::apply);
     connect(project, &Project::changed, this, &TrackFxPanel::refresh);
     refresh();
+}
+
+void TrackFxPanel::editFx(const QString &key, const std::function<void(Track &)> &fn)
+{
+    if (m_updating)
+        return;
+    m_project->edit(
+        tr("Track Effects"),
+        [&](ProjectData &d) {
+            const int i = d.trackIndex(m_trackId);
+            if (i >= 0)
+                fn(d.tracks[i]);
+        },
+        key.isEmpty() ? QString() : key + m_trackId.toString());
+}
+
+QSlider *TrackFxPanel::slider(QFormLayout *form, const QString &label, int min, int max, double scale,
+                              const QString &suffix, std::function<double(const Track &)> get,
+                              std::function<void(Track &, double)> set)
+{
+    auto *row = new QWidget(m_body);
+    auto *h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    auto *s = new QSlider(Qt::Horizontal, row);
+    s->setRange(min, max);
+    auto *value = new QLabel(row);
+    value->setMinimumWidth(52);
+    value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    value->setStyleSheet(QStringLiteral("color: #b0b0bc;"));
+    h->addWidget(s, 1);
+    h->addWidget(value);
+    form->addRow(label, row);
+    auto show = [value, scale, suffix](int v) {
+        value->setText(QString::number(v * scale, 'f', scale < 1 ? 1 : 0) + suffix);
+    };
+    connect(s, &QSlider::valueChanged, this, [this, scale, set, show, label](int v) {
+        show(v);
+        editFx(label, [&](Track &t) { set(t, v * scale); });
+    });
+    m_refreshers << [s, scale, get, show](const Track &t) {
+        if (!s->isSliderDown())
+            s->setValue(int(std::lround(get(t) / scale)));
+        show(s->value());
+    };
+    return s;
+}
+
+QCheckBox *TrackFxPanel::check(QFormLayout *form, const QString &label, std::function<bool(const Track &)> get,
+                               std::function<void(Track &, bool)> set)
+{
+    auto *cb = new QCheckBox(label, m_body);
+    form->addRow(cb);
+    connect(cb, &QCheckBox::toggled, this, [this, set, label](bool on) { editFx(label, [&](Track &t) { set(t, on); }); });
+    m_refreshers << [cb, get](const Track &t) { cb->setChecked(get(t)); };
+    return cb;
 }
 
 void TrackFxPanel::setTrack(const QUuid &trackId)
@@ -210,52 +367,17 @@ void TrackFxPanel::refresh()
 {
     const int i = m_project->data().trackIndex(m_trackId);
     const bool ok = i >= 0 && m_project->data().tracks[i].isAudio();
-    setEnabled(ok);
+    m_body->setEnabled(ok);
     if (!ok) {
         m_title->setText(tr("Select an audio track (click its header or FX button)"));
         return;
     }
-    const AudioFx &fx = m_project->data().tracks[i].fx;
+    const Track &t = m_project->data().tracks[i];
     m_updating = true;
-    m_title->setText(tr("Effects: %1").arg(m_project->data().tracks[i].name));
-    m_cleanup->setChecked(fx.dialogueCleanup);
-    m_eq->setChecked(fx.eqEnabled);
-    m_low->setValue(int(std::lround(fx.lowGainDb * 10)));
-    m_mid->setValue(int(std::lround(fx.midGainDb * 10)));
-    m_high->setValue(int(std::lround(fx.highGainDb * 10)));
-    m_comp->setChecked(fx.compressorEnabled);
-    m_threshold->setValue(int(std::lround(fx.thresholdDb)));
-    m_ratio->setValue(int(std::lround(fx.ratio * 10)));
-    m_values->setText(tr("EQ  %1 / %2 / %3 dB   ·   Comp  %4 dB, %5:1")
-                          .arg(fx.lowGainDb, 0, 'f', 1)
-                          .arg(fx.midGainDb, 0, 'f', 1)
-                          .arg(fx.highGainDb, 0, 'f', 1)
-                          .arg(fx.thresholdDb, 0, 'f', 0)
-                          .arg(fx.ratio, 0, 'f', 1));
+    m_title->setText(tr("Effects: %1").arg(t.name));
+    for (const auto &r : m_refreshers)
+        r(t);
     m_updating = false;
-}
-
-void TrackFxPanel::apply()
-{
-    if (m_updating)
-        return;
-    m_project->edit(
-        tr("Track Effects"),
-        [&](ProjectData &d) {
-            const int i = d.trackIndex(m_trackId);
-            if (i < 0)
-                return;
-            AudioFx &fx = d.tracks[i].fx;
-            fx.dialogueCleanup = m_cleanup->isChecked();
-            fx.eqEnabled = m_eq->isChecked();
-            fx.lowGainDb = m_low->value() / 10.0;
-            fx.midGainDb = m_mid->value() / 10.0;
-            fx.highGainDb = m_high->value() / 10.0;
-            fx.compressorEnabled = m_comp->isChecked();
-            fx.thresholdDb = m_threshold->value();
-            fx.ratio = m_ratio->value() / 10.0;
-        },
-        QStringLiteral("fx") + m_trackId.toString());
 }
 
 // ---------------------------------------------------------------------------

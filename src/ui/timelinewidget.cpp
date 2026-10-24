@@ -1,6 +1,7 @@
 #include "ui/timelinewidget.h"
 
 #include "core/project.h"
+#include "core/looks.h"
 #include "core/timelineops.h"
 #include "media/waveformcache.h"
 #include "ui/theme.h"
@@ -466,7 +467,9 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
     const QRect r = clipRect(row, c);
     const bool selected = m_selection.contains(c.id);
 
-    QColor base = t.isAudio() ? theme::audioClip : (m && m->isStill() ? theme::imageClip : theme::videoClip);
+    QColor base = t.isAudio() ? theme::audioClip
+                              : (m && m->isTitle() ? theme::titleClip
+                                                   : (m && m->isStill() ? theme::imageClip : theme::videoClip));
     if (t.muted)
         base = base.darker(180);
     p.setPen(Qt::NoPen);
@@ -488,6 +491,19 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
                 p.drawImage(QPoint(x, body.top()), scaled);
             if (!c.color.isIdentity())
                 p.fillRect(body, QColor(255, 196, 0, 30));
+        }
+    }
+
+    // Transition into this clip: a crossed band at its head.
+    if (t.isVideo()) {
+        const Transition tr = timeline::effectiveTransition(t, c);
+        if (!tr.isNone()) {
+            const QRect band(r.left(), r.top() + 16, std::max(6, xForTime(c.start + tr.duration) - r.left()),
+                             r.height() - 16);
+            p.fillRect(band, QColor(255, 196, 0, 70));
+            p.setPen(QPen(QColor(255, 220, 120, 220), 1));
+            p.drawLine(band.topLeft(), band.bottomRight());
+            p.drawLine(band.bottomLeft(), band.topRight());
         }
     }
     if (m && t.isAudio())
@@ -513,6 +529,22 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
     QString label = m ? m->name : tr("(missing media)");
     if (!c.linkId.isNull())
         label = QStringLiteral("⇄ ") + label;
+    // Badges for what's applied to the clip.
+    QStringList badges;
+    if (!qFuzzyCompare(c.speed, 1.0))
+        badges << QStringLiteral("%1×").arg(c.speed, 0, 'g', 3);
+    if (t.isVideo()) {
+        if (!c.transform.isIdentity())
+            badges << QStringLiteral("◱");
+        if (c.motion != Motion::None)
+            badges << QStringLiteral("⤢");
+        if (c.key.enabled)
+            badges << QStringLiteral("▣");
+        if (c.stabilize)
+            badges << QStringLiteral("≋");
+    }
+    if (!badges.isEmpty())
+        label = badges.join(QLatin1Char(' ')) + QStringLiteral("  ") + label;
     p.drawText(title.adjusted(5, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                p.fontMetrics().elidedText(label, Qt::ElideRight, title.width() - 9));
     p.restore();
@@ -539,8 +571,8 @@ void TimelineWidget::paintWaveform(QPainter &p, const QRect &r, const Clip &c, c
     const int x0 = std::max(r.left(), kHeaderWidth);
     const int x1 = std::min(r.right(), width());
     for (int x = x0; x < x1; ++x) {
-        const TimeUs t0 = timeForX(x) - c.start + c.in;
-        const TimeUs t1 = timeForX(x + 1) - c.start + c.in;
+        const TimeUs t0 = c.sourceAt(timeForX(x));
+        const TimeUs t1 = c.sourceAt(timeForX(x + 1));
         qsizetype b0 = qsizetype(t0 * WaveformCache::kPeaksPerSecond / kUsPerSecond);
         qsizetype b1 = std::max(b0 + 1, qsizetype(t1 * WaveformCache::kPeaksPerSecond / kUsPerSecond));
         float v = 0;
@@ -800,6 +832,42 @@ void TimelineWidget::contextMenuEvent(QContextMenuEvent *e)
         menu.addAction(tr("Split at Playhead"), this, &TimelineWidget::splitAtPlayhead);
         menu.addAction(tr("Delete"), this, [this] { deleteSelection(false); });
         menu.addAction(tr("Ripple Delete"), this, [this] { deleteSelection(true); });
+        menu.addSeparator();
+        QMenu *speed = menu.addMenu(tr("Speed"));
+        for (double v : {0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0}) {
+            speed->addAction(QStringLiteral("%1×").arg(v), this, [this, id, v] {
+                m_project->edit(tr("Change Speed"), [&](ProjectData &d) { timeline::setClipSpeed(d, id, v); });
+            });
+        }
+        if (m_project->data().tracks[ti].isVideo()) {
+            QMenu *trans = menu.addMenu(tr("Transition In"));
+            trans->addAction(tr("None"), this, [this, id] {
+                m_project->edit(tr("Transition"), [&](ProjectData &d) {
+                    if (Clip *cl = d.clipById(id))
+                        cl->transition = Transition();
+                });
+            });
+            for (const auto &tt : transitionTypes()) {
+                trans->addAction(tt.name, this, [this, id, type = tt.id] {
+                    m_project->edit(tr("Transition"), [&](ProjectData &d) {
+                        if (Clip *cl = d.clipById(id))
+                            cl->transition = {type, std::min<TimeUs>(kUsPerSecond, cl->duration() / 2)};
+                    });
+                });
+            }
+            QMenu *looks = menu.addMenu(tr("Look"));
+            for (const auto &lp : lookPresets()) {
+                looks->addAction(lp.name, this, [this, id, a = lp.adjust] {
+                    m_project->edit(tr("Look"), [&](ProjectData &d) {
+                        if (Clip *cl = d.clipById(id))
+                            cl->color = a;
+                    });
+                });
+            }
+        }
+        if (m_menuExtender)
+            m_menuExtender(&menu, id);
+        menu.addSeparator();
         const Clip *c = m_project->data().clipById(id);
         if (c && !c->linkId.isNull()) {
             menu.addAction(tr("Unlink Audio/Video"), this, [this, link = c->linkId] {

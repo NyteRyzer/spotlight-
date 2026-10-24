@@ -15,6 +15,7 @@ inline const QColor accentDark{204, 150, 0};
 inline const QColor videoClip{58, 110, 196};
 inline const QColor audioClip{46, 160, 110};
 inline const QColor imageClip{150, 92, 196};
+inline const QColor titleClip{214, 120, 40};
 inline const QColor playhead{255, 70, 70};
 inline const QColor panel{30, 30, 34};
 inline const QColor panelAlt{38, 38, 44};

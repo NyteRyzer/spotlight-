@@ -26,6 +26,10 @@ public:
         m_guides = on;
         update();
     }
+    // Brush tool: strokes paint onto the selected Drawing layer (a new
+    // full-canvas Drawing layer is created if none is selected).
+    void setBrush(bool enabled, const QColor &color, double width, bool eraser);
+    bool brushEnabled() const { return m_brush; }
 
 signals:
     void selectionChanged(const QUuid &layerId);
@@ -42,7 +46,7 @@ protected:
     void dropEvent(QDropEvent *) override;
 
 private:
-    enum class Drag { None, Move, Scale };
+    enum class Drag { None, Move, Scale, Paint };
 
     const DesignDocument &doc() const;
     QTransform viewTransform() const; // canvas -> widget
@@ -58,6 +62,10 @@ private:
     bool m_previewActive = false;
     bool m_guides = false;
     DesignDocument m_preview;
+    bool m_brush = false;
+    QColor m_brushColor = Qt::white;
+    double m_brushWidth = 12.0;
+    bool m_eraser = false;
 };
 
 } // namespace spotlight

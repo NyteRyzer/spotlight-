@@ -12,6 +12,7 @@ class QToolButton;
 class QSlider;
 class QCheckBox;
 class QGroupBox;
+class QFormLayout;
 
 namespace spotlight {
 
@@ -48,7 +49,9 @@ private:
     bool m_updating = false;
 };
 
-// EQ, compressor and dialogue cleanup for the selected audio track.
+// The selected audio track's effect chain: cleanup (denoise, gate,
+// de-esser), EQ, compressor, voice changer, reverb/echo, limiter, plus voice
+// track / auto-ducking and one-click presets.
 class TrackFxPanel : public QWidget {
     Q_OBJECT
 public:
@@ -57,20 +60,17 @@ public:
 
 private:
     void refresh();
-    void apply();
+    void editFx(const QString &key, const std::function<void(Track &)> &fn);
+    QSlider *slider(QFormLayout *form, const QString &label, int min, int max, double scale, const QString &suffix,
+                    std::function<double(const Track &)> get, std::function<void(Track &, double)> set);
+    QCheckBox *check(QFormLayout *form, const QString &label, std::function<bool(const Track &)> get,
+                     std::function<void(Track &, bool)> set);
 
     Project *m_project;
     QUuid m_trackId;
     QLabel *m_title;
-    QCheckBox *m_cleanup;
-    QGroupBox *m_eq;
-    QSlider *m_low;
-    QSlider *m_mid;
-    QSlider *m_high;
-    QGroupBox *m_comp;
-    QSlider *m_threshold;
-    QSlider *m_ratio;
-    QLabel *m_values;
+    QWidget *m_body;
+    QVector<std::function<void(const Track &)>> m_refreshers;
     bool m_updating = false;
 };
 
@@ -81,6 +81,7 @@ public:
     AudioStudio(Project *project, TimelinePlayer *player, MediaBin *bin, QWidget *parent = nullptr);
 
     TimelineWidget *timeline() const { return m_timeline; }
+    ClipInspector *inspector() const { return m_inspector; }
 
 private:
     void rebuildMixer();

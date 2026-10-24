@@ -342,7 +342,7 @@ QImage alphaOutline(const QImage &src, double radius, const QColor &color)
     for (int y = 0; y < h; ++y) {
         const auto *line = reinterpret_cast<const QRgb *>(a.constScanLine(y));
         for (int x = 0; x < w; ++x)
-            dist[y * w + x] = qAlpha(line[x]) >= 128 ? 0 : inf;
+            dist[y * w + x] = qAlpha(line[x]) >= 96 ? 0 : inf;
     }
     auto relax = [&](int i, int j, int cost) {
         if (dist[j] + cost < dist[i])
