@@ -48,7 +48,7 @@ jobs:
           # 124 = still running when the timeout stopped it, i.e. it started fine.
           [ "$code" -eq 124 ] || { echo "AppImage exited early with $code"; exit 1; }
           set -e
-          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen build-appimage/SPOTLIGHT-*.AppImage --self-test "$RUNNER_TEMP/self-test"
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a build-appimage/SPOTLIGHT-*.AppImage --self-test "$RUNNER_TEMP/self-test"
       - uses: actions/upload-artifact@v4
         with:
           name: spotlight-linux
