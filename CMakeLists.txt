@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Spotlight
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "SPOTLIGHT! - all-in-one creative production studio"
     HOMEPAGE_URL "https://github.com/NyteRyzer/spotlight-"
     LANGUAGES CXX)
