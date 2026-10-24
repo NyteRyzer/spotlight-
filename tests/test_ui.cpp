@@ -8,6 +8,7 @@
 #include "media/timelineplayer.h"
 #include "media/videoview.h"
 #include "ui/inspector.h"
+#include "ui/edittools.h"
 #include <QTabWidget>
 #include "ui/programmonitor.h"
 #include "ui/theme.h"
@@ -199,6 +200,28 @@ private slots:
             const QUuid mid = project->data().media[0].id;
             project->edit("Add", [&](ProjectData &d) { timeline::placeMedia(d, mid, 0, 0); });
             QVERIFY(project->data().duration() > 0);
+
+            // FFmpeg-backed tools on the selected clip.
+            auto *tools = w.findChild<EditTools *>();
+            QVERIFY(tools);
+            const QUuid clipId = project->data().tracks[0].clips.first().id;
+            video->timeline()->setSelection({clipId});
+            video->programMonitor()->player()->seek(kUsPerSecond);
+            const TimeUs before = project->data().duration();
+            tools->freezeFrame();
+            QCOMPARE(project->data().duration(), before + 2 * kUsPerSecond);
+            QCOMPARE(project->data().media.last().kind, MediaKind::Image);
+            QVERIFY(QFileInfo::exists(project->data().media.last().path));
+            video->timeline()->setSelection({clipId});
+            const int mediaCount = project->data().media.size();
+            tools->reverseClip();
+            QCOMPARE(project->data().media.size(), mediaCount + 1);
+            QVERIFY(project->data().media.last().name.contains("reversed"));
+            QCOMPARE(project->data().clipById(clipId)->mediaId, project->data().media.last().id);
+            tools->detectScenes(); // testsrc has no cuts: nothing changes, no crash
+            project->undoStack()->undo(); // reverse
+            project->undoStack()->undo(); // freeze
+            QCOMPARE(project->data().duration(), before);
         }
 
         // Design studio: text layer + undo.

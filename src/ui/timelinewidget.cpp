@@ -507,7 +507,7 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
         }
     }
     if (m && t.isAudio())
-        paintWaveform(p, QRect(r.left(), r.top() + 16, r.width(), r.height() - 16), c, *m);
+        paintWaveform(p, QRect(r.left(), r.top() + 16, r.width(), r.height() - 16), c, *m, row.trackIndex);
 
     // Fades.
     if (c.fadeIn > 0 || c.fadeOut > 0) {
@@ -556,7 +556,7 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
     }
 }
 
-void TimelineWidget::paintWaveform(QPainter &p, const QRect &r, const Clip &c, const MediaItem &m)
+void TimelineWidget::paintWaveform(QPainter &p, const QRect &r, const Clip &c, const MediaItem &m, int trackIndex)
 {
     const QVector<float> *peaks = WaveformCache::instance()->peaks(m.path);
     const int mid = r.center().y();
@@ -567,6 +567,11 @@ void TimelineWidget::paintWaveform(QPainter &p, const QRect &r, const Clip &c, c
     }
     const double gain = c.gain;
     const int half = r.height() / 2 - 1;
+    // Show auto-ducking as a dip in the waveform, as it will be heard.
+    const Track &track = shown().tracks[trackIndex];
+    QVector<TimeRange> duck;
+    if (track.fx.duckUnderVoice)
+        duck = voiceRanges(shown(), trackIndex);
     p.setPen(QColor(200, 255, 225, 200));
     const int x0 = std::max(r.left(), kHeaderWidth);
     const int x1 = std::min(r.right(), width());
@@ -578,7 +583,9 @@ void TimelineWidget::paintWaveform(QPainter &p, const QRect &r, const Clip &c, c
         float v = 0;
         for (qsizetype b = std::max<qsizetype>(0, b0); b < std::min(b1, peaks->size()); ++b)
             v = std::max(v, (*peaks)[b]);
-        const double env = timeline::fadeEnvelope(c, timeForX(x));
+        double env = timeline::fadeEnvelope(c, timeForX(x));
+        if (!duck.isEmpty())
+            env *= duckGain(duck, track.fx.duckAmountDb, timeForX(x));
         const int h = int(std::min(1.0, v * gain * env) * half);
         p.drawLine(x, mid - h, x, mid + h);
     }

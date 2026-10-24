@@ -8,12 +8,15 @@
 #include "core/designrender.h"
 #include "core/exporter.h"
 #include "core/project.h"
+#include "core/looks.h"
 #include "core/timelineops.h"
+#include "core/titles.h"
 #include "media/timelineplayer.h"
 #include "media/videoview.h"
 #include "ui/audiostudio.h"
 #include "ui/designcanvas.h"
 #include "ui/designstudio.h"
+#include "ui/inspector.h"
 #include "ui/mainwindow.h"
 #include "ui/mediabin.h"
 #include "ui/programmonitor.h"
@@ -27,6 +30,7 @@
 #include <QElapsedTimer>
 #include <QProcess>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QThread>
@@ -153,14 +157,40 @@ int main(int argc, char *argv[])
         }
         return QUuid();
     };
+    // Titles are rendered images; make them before the edit.
+    const QSize frame(1920, 1080);
+    MediaItem lowerThird, subscribe;
+    titles::renderTitleMedia(titles::makeTitle(1, frame, QStringLiteral("Alex Rivera"),
+                                               QStringLiteral("Creator · made with SPOTLIGHT!")),
+                             QStringLiteral("Title – Alex Rivera"), &lowerThird, nullptr);
+    titles::renderTitleMedia(titles::makeTitle(3, frame, QStringLiteral("SUBSCRIBE")), QStringLiteral("Title – SUBSCRIBE"),
+                             &subscribe, nullptr);
     project->edit("Build demo timeline", [&](ProjectData &d) {
         d.name = QStringLiteral("My Channel Trailer");
+        d.media.append(lowerThird);
+        d.media.append(subscribe);
         const QUuid v1a = timeline::placeMedia(d, mediaId(sunset), 0, 0, 0, 7 * kUsPerSecond);
         const QUuid v1b = timeline::placeMedia(d, mediaId(fractal), 0, 7 * kUsPerSecond);
-        timeline::placeMedia(d, mediaId(city), 0, 15 * kUsPerSecond, kUsPerSecond, 8 * kUsPerSecond);
+        const QUuid v1c = timeline::placeMedia(d, mediaId(city), 0, 15 * kUsPerSecond, kUsPerSecond, 8 * kUsPerSecond);
         d.clipById(v1a)->fadeIn = kUsPerSecond;
-        d.clipById(v1b)->color.saturation = 1.35;
-        d.clipById(v1b)->color.contrast = 1.1;
+        d.clipById(v1a)->motion = Motion::ZoomIn;
+        d.clipById(v1b)->color = lookPresets()[4].adjust; // Cinematic
+        d.clipById(v1b)->color.saturation = 1.25;
+        d.clipById(v1b)->transition = {QStringLiteral("fade"), kUsPerSecond};
+        d.clipById(v1c)->transition = {QStringLiteral("circleopen"), kUsPerSecond};
+        d.clipById(v1c)->color = lookPresets()[2].adjust; // Cool
+        // Picture-in-picture on V2, titles above it.
+        const QUuid pip = timeline::placeMedia(d, mediaId(city), 1, 9 * kUsPerSecond, 0, 5 * kUsPerSecond);
+        Clip *pc = d.clipById(pip);
+        pc->transform.scale = 0.3;
+        pc->transform.x = 0.31;
+        pc->transform.y = -0.28;
+        pc->fadeIn = pc->fadeOut = 300 * kUsPerSecond / 1000;
+        const int v3 = d.addTrack(TrackType::Video, QStringLiteral("V3"));
+        const QUuid lt = timeline::placeMedia(d, lowerThird.id, v3, 8 * kUsPerSecond, 0, 6 * kUsPerSecond);
+        d.clipById(lt)->fadeIn = d.clipById(lt)->fadeOut = 300 * kUsPerSecond / 1000;
+        const QUuid sub = timeline::placeMedia(d, subscribe.id, v3, 17 * kUsPerSecond, 0, 4 * kUsPerSecond);
+        d.clipById(sub)->fadeIn = 300 * kUsPerSecond / 1000;
         const int a1 = d.audioTrackIndices().value(0);
         const int a2 = d.audioTrackIndices().value(1);
         const QUuid vo = timeline::placeMedia(d, mediaId(voice), a1, 2 * kUsPerSecond);
@@ -190,6 +220,12 @@ int main(int argc, char *argv[])
         d.tracks[a1].fx.ratio = 4;
         d.tracks[a2].volume = 0.7;
         d.tracks[a2].pan = 0.1;
+        d.tracks[a1].voice = true;
+        d.tracks[a1].fx.gateEnabled = true;
+        d.tracks[a1].fx.deEsser = true;
+        d.tracks[a1].fx.limiterEnabled = true;
+        d.tracks[a2].fx.duckUnderVoice = true;
+        d.tracks[a2].fx.duckAmountDb = -14;
         timeline::toggleMarker(d, 0, 0, QStringLiteral("Intro"));
         timeline::toggleMarker(d, 7 * kUsPerSecond, 0, QStringLiteral("The Build"));
         timeline::toggleMarker(d, 15 * kUsPerSecond, 0, QStringLiteral("Outro"));
@@ -203,8 +239,12 @@ int main(int argc, char *argv[])
     design->applyTemplate(0);
     project->edit("Thumbnail copy", [&](ProjectData &d) {
         for (auto &l : d.design.layers) {
-            if (l.type == LayerType::Text && l.text == QLatin1String("NO WAY!"))
+            if (l.type == LayerType::Text && l.text == QLatin1String("NO WAY!")) {
                 l.text = l.name = QStringLiteral("I BUILT IT!");
+                l.glow = true;
+                l.glowColor = QColor(255, 196, 0, 200);
+                l.glowSize = 22;
+            }
             else if (l.type == LayerType::Text && l.text.startsWith(QLatin1String("I tried")))
                 l.text = l.name = QStringLiteral("one app for video, audio & thumbnails");
         }
@@ -228,19 +268,27 @@ int main(int argc, char *argv[])
     if (const MediaItem *src = project->data().mediaById(mediaId(sunset)))
         video->sourceMonitor()->load(*src);
     video->timeline()->zoomToFit();
-    player->seek(9 * kUsPerSecond + 300000);
-    pump(2500);
+    player->seek(11 * kUsPerSecond + 300000);
+    pump(3000);
     for (const auto &c : project->data().tracks[0].clips) {
         if (c.start == 7 * kUsPerSecond)
             video->timeline()->setSelection(timeline::groupOf(project->data(), c.id));
     }
-    pump(800);
+    if (auto *tabs = video->inspector()->findChild<QTabWidget *>())
+        tabs->setCurrentIndex(1); // Color: looks
+    pump(1200);
     w.statusBar()->clearMessage();
     w.grab().save(outDir + "/video-studio.png");
 
     // ---- Audio Studio ------------------------------------------------------
     w.setWorkspace(MainWindow::Audio);
     audio->timeline()->zoomToFit();
+    if (auto *fx = audio->findChild<TrackFxPanel *>()) {
+        for (const auto &t : project->data().tracks) {
+            if (t.voice)
+                fx->setTrack(t.id);
+        }
+    }
     pump(2500); // waveforms
     audio->timeline()->setSelection({});
     pump(500);
@@ -260,6 +308,8 @@ int main(int argc, char *argv[])
     w.statusBar()->clearMessage();
     w.grab().save(outDir + "/design-studio.png");
 
+    QFile::remove(lowerThird.path);
+    QFile::remove(subscribe.path);
     project->markSaved();
     qInfo("Screenshots written to %s", qPrintable(QDir(outDir).absolutePath()));
     return 0;

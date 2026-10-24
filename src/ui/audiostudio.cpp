@@ -152,6 +152,7 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
     , m_title(new QLabel(this))
     , m_body(new QWidget(this))
 {
+    setMinimumWidth(330);
     auto *outer = new QVBoxLayout(this);
     QFont f = m_title->font();
     f.setBold(true);
@@ -162,6 +163,7 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidget(m_body);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     outer->addWidget(scroll, 1);
 
     auto *page = new QVBoxLayout(m_body);
@@ -227,20 +229,20 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
         b->setText(list[i].name);
         b->setToolTip(list[i].tip);
         b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        grid->addWidget(b, i / 3, i % 3);
+        grid->addWidget(b, i / 2, i % 2);
         const auto fn = list[i].apply;
         connect(b, &QToolButton::clicked, this, [this, fn] { editFx(QString(), fn); });
     }
     presets->addRow(presetRow);
 
     auto *clean = section(tr("Cleanup"));
-    check(clean, tr("Dialogue cleanup (rumble + noise reduction)"), [](const Track &t) { return t.fx.dialogueCleanup; },
+    check(clean, tr("Dialogue cleanup (denoise)"), [](const Track &t) { return t.fx.dialogueCleanup; },
           [](Track &t, bool on) { t.fx.dialogueCleanup = on; });
-    check(clean, tr("Noise gate (mute room tone between words)"), [](const Track &t) { return t.fx.gateEnabled; },
+    check(clean, tr("Noise gate"), [](const Track &t) { return t.fx.gateEnabled; },
           [](Track &t, bool on) { t.fx.gateEnabled = on; });
     slider(clean, tr("Gate threshold"), -70, -15, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.gateThresholdDb; },
            [](Track &t, double v) { t.fx.gateThresholdDb = v; });
-    check(clean, tr("De-esser (soften harsh “s” sounds)"), [](const Track &t) { return t.fx.deEsser; },
+    check(clean, tr("De-esser (soft “s” sounds)"), [](const Track &t) { return t.fx.deEsser; },
           [](Track &t, bool on) { t.fx.deEsser = on; });
 
     auto *eq = section(tr("3-Band EQ"));
@@ -285,9 +287,9 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
            [](Track &t, double v) { t.fx.limiterCeilingDb = v; });
 
     auto *mix = section(tr("Auto-Ducking"));
-    check(mix, tr("This is a voice track (dialogue, voiceover)"), [](const Track &t) { return t.voice; },
+    check(mix, tr("Voice track (dialogue)"), [](const Track &t) { return t.voice; },
           [](Track &t, bool on) { t.voice = on; });
-    check(mix, tr("Duck this track under voice tracks"), [](const Track &t) { return t.fx.duckUnderVoice; },
+    check(mix, tr("Duck under voice tracks"), [](const Track &t) { return t.fx.duckUnderVoice; },
           [](Track &t, bool on) { t.fx.duckUnderVoice = on; });
     slider(mix, tr("Duck by"), -30, -3, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.duckAmountDb; },
            [](Track &t, double v) { t.fx.duckAmountDb = v; });

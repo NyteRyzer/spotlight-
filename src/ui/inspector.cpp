@@ -30,6 +30,7 @@ QWidget *scrollPage(QWidget *content, QWidget *parent)
     scroll->setWidget(content);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     return scroll;
 }
 
@@ -57,6 +58,7 @@ ClipInspector::ClipInspector(Project *project, QWidget *parent)
     , m_info(new QLabel(this))
     , m_tabs(new QTabWidget(this))
 {
+    setMinimumWidth(300);
     auto *layout = new QVBoxLayout(this);
     QFont tf = m_title->font();
     tf.setBold(true);
@@ -74,6 +76,9 @@ ClipInspector::ClipInspector(Project *project, QWidget *parent)
     m_colorTab = buildColorTab();
     m_effectsTab = buildEffectsTab();
     m_audioTab = buildAudioTab();
+    // Pages live in the tab widget only while relevant; keep the rest hidden.
+    for (QWidget *page : {m_videoTab, m_colorTab, m_effectsTab, m_audioTab})
+        page->hide();
 
     connect(WaveformCache::instance(), &WaveformCache::ready, this, [this] {
         if (!m_pendingNormalize.isNull() && m_pendingNormalize == m_clip && normalize())
@@ -503,6 +508,8 @@ void ClipInspector::refresh()
     if (!same) {
         while (m_tabs->count() > 0)
             m_tabs->removeTab(0);
+        for (QWidget *page : {m_videoTab, m_colorTab, m_effectsTab, m_audioTab})
+            page->hide();
         for (const auto &w : wanted)
             m_tabs->addTab(w.first, w.second);
         for (int i = 0; i < m_tabs->count(); ++i) {

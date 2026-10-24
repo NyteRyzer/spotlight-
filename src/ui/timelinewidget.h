@@ -103,7 +103,7 @@ private:
     void paintRuler(QPainter &p);
     void paintRow(QPainter &p, const Row &row);
     void paintClip(QPainter &p, const Row &row, const Clip &c);
-    void paintWaveform(QPainter &p, const QRect &r, const Clip &c, const MediaItem &m);
+    void paintWaveform(QPainter &p, const QRect &r, const Clip &c, const MediaItem &m, int trackIndex);
 
     Project *m_project;
     Mode m_mode;
