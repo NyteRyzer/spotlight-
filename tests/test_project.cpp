@@ -45,6 +45,48 @@ private slots:
         d.design.layers.append(shape);
         timeline::toggleMarker(d, 3 * S, 0, "Intro");
 
+        // Pro fields.
+        Clip *c = d.clipById(id);
+        c->speed = 1.5;
+        c->color.temperature = 0.4;
+        c->color.mono = MonoMode::Sepia;
+        c->color.vignette = 0.3;
+        c->transform.scale = 0.5;
+        c->transform.x = 0.2;
+        c->transform.flipH = true;
+        c->transform.cropTop = 0.1;
+        c->motion = Motion::PanRight;
+        c->key.enabled = true;
+        c->key.color = QColor(0, 0, 255);
+        c->transition = {QStringLiteral("wipeleft"), S / 2};
+        c->stabilize = true;
+        d.tracks[2].voice = true;
+        d.tracks[3].fx.duckUnderVoice = true;
+        d.tracks[3].fx.reverbEnabled = true;
+        d.tracks[3].fx.pitchSemitones = -3;
+        text.italic = true;
+        text.textBox = true;
+        text.align = 1;
+        text.glow = true;
+        text.blend = BlendMode::Screen;
+        d.design.layers[0] = text;
+        DesignLayer drawing;
+        drawing.id = QUuid::createUuid();
+        drawing.type = LayerType::Drawing;
+        drawing.shapeSize = QSize(100, 100);
+        drawing.strokes.append({Qt::red, 8, false, {QPointF(1, 2), QPointF(30.5, 40)}});
+        drawing.dropShadow = true;
+        d.design.layers.append(drawing);
+        shape.shape = ShapeKind::Star;
+        shape.strokeWidth = 3;
+        d.design.layers[1] = shape;
+        MediaItem title;
+        title.id = QUuid::createUuid();
+        title.kind = MediaKind::Image;
+        title.path = "/tmp/title.png";
+        title.titleDesign = d.design.toJson();
+        d.media.append(title);
+
         ProjectData back;
         QString err;
         QVERIFY2(ProjectData::fromJson(d.toJson(), &back, &err), qPrintable(err));
@@ -55,6 +97,20 @@ private slots:
         QCOMPARE(back.toJson(), d.toJson());
         QCOMPARE(back.design.layers[0].textColor, QColor(255, 0, 0, 200));
         QCOMPARE(back.clipById(id)->color.saturation, 1.5);
+        const Clip *bc = back.clipById(id);
+        QCOMPARE(bc->speed, 1.5);
+        QCOMPARE(bc->color.mono, MonoMode::Sepia);
+        QVERIFY(bc->transform == d.clipById(id)->transform);
+        QCOMPARE(bc->motion, Motion::PanRight);
+        QCOMPARE(bc->key.color, QColor(0, 0, 255));
+        QCOMPARE(bc->transition.type, QStringLiteral("wipeleft"));
+        QVERIFY(back.tracks[2].voice);
+        QCOMPARE(back.tracks[3].fx.pitchSemitones, -3.0);
+        QCOMPARE(back.design.layers[0].blend, BlendMode::Screen);
+        QCOMPARE(back.design.layers[1].shape, ShapeKind::Star);
+        QCOMPARE(back.design.layers[2].strokes.size(), 1);
+        QCOMPARE(back.design.layers[2].strokes[0].points[1], QPointF(30.5, 40));
+        QVERIFY(back.media.last().isTitle());
     }
 
     void rejectsForeignFiles()

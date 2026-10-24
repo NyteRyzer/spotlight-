@@ -37,13 +37,53 @@ QJsonObject clipToJson(const Clip &c)
     o["gain"] = c.gain;
     o["fadeIn"] = double(c.fadeIn);
     o["fadeOut"] = double(c.fadeOut);
+    if (!qFuzzyCompare(c.speed, 1.0))
+        o["speed"] = c.speed;
     if (!c.color.isIdentity()) {
         QJsonObject col;
         col["brightness"] = c.color.brightness;
         col["contrast"] = c.color.contrast;
         col["saturation"] = c.color.saturation;
+        col["temperature"] = c.color.temperature;
+        col["tint"] = c.color.tint;
+        col["mono"] = int(c.color.mono);
+        col["vignette"] = c.color.vignette;
+        col["blur"] = c.color.blur;
         o["color"] = col;
     }
+    if (!c.transform.isIdentity()) {
+        const Transform &t = c.transform;
+        QJsonObject tf;
+        tf["scale"] = t.scale;
+        tf["x"] = t.x;
+        tf["y"] = t.y;
+        tf["rotation"] = t.rotation;
+        tf["opacity"] = t.opacity;
+        tf["flipH"] = t.flipH;
+        tf["flipV"] = t.flipV;
+        tf["cropL"] = t.cropLeft;
+        tf["cropT"] = t.cropTop;
+        tf["cropR"] = t.cropRight;
+        tf["cropB"] = t.cropBottom;
+        o["transform"] = tf;
+    }
+    if (c.motion != Motion::None)
+        o["motion"] = int(c.motion);
+    if (c.key.enabled) {
+        QJsonObject k;
+        k["color"] = c.key.color.name();
+        k["similarity"] = c.key.similarity;
+        k["blend"] = c.key.blend;
+        o["chromaKey"] = k;
+    }
+    if (!c.transition.isNone()) {
+        QJsonObject tr;
+        tr["type"] = c.transition.type;
+        tr["duration"] = double(c.transition.duration);
+        o["transition"] = tr;
+    }
+    if (c.stabilize)
+        o["stabilize"] = true;
     return o;
 }
 
@@ -59,10 +99,40 @@ Clip clipFromJson(const QJsonObject &o)
     c.gain = o["gain"].toDouble(1.0);
     c.fadeIn = TimeUs(o["fadeIn"].toDouble());
     c.fadeOut = TimeUs(o["fadeOut"].toDouble());
+    c.speed = std::clamp(o["speed"].toDouble(1.0), 0.1, 8.0);
     const QJsonObject col = o["color"].toObject();
     c.color.brightness = col["brightness"].toDouble(0.0);
     c.color.contrast = col["contrast"].toDouble(1.0);
     c.color.saturation = col["saturation"].toDouble(1.0);
+    c.color.temperature = col["temperature"].toDouble(0.0);
+    c.color.tint = col["tint"].toDouble(0.0);
+    c.color.mono = MonoMode(std::clamp(col["mono"].toInt(0), 0, 2));
+    c.color.vignette = col["vignette"].toDouble(0.0);
+    c.color.blur = col["blur"].toDouble(0.0);
+    const QJsonObject tf = o["transform"].toObject();
+    c.transform.scale = tf["scale"].toDouble(1.0);
+    c.transform.x = tf["x"].toDouble(0.0);
+    c.transform.y = tf["y"].toDouble(0.0);
+    c.transform.rotation = tf["rotation"].toDouble(0.0);
+    c.transform.opacity = tf["opacity"].toDouble(1.0);
+    c.transform.flipH = tf["flipH"].toBool();
+    c.transform.flipV = tf["flipV"].toBool();
+    c.transform.cropLeft = tf["cropL"].toDouble(0.0);
+    c.transform.cropTop = tf["cropT"].toDouble(0.0);
+    c.transform.cropRight = tf["cropR"].toDouble(0.0);
+    c.transform.cropBottom = tf["cropB"].toDouble(0.0);
+    c.motion = Motion(std::clamp(o["motion"].toInt(0), 0, int(Motion::PanDown)));
+    if (o.contains("chromaKey")) {
+        const QJsonObject k = o["chromaKey"].toObject();
+        c.key.enabled = true;
+        c.key.color = QColor(k["color"].toString(QStringLiteral("#00ff00")));
+        c.key.similarity = k["similarity"].toDouble(0.15);
+        c.key.blend = k["blend"].toDouble(0.08);
+    }
+    const QJsonObject tr = o["transition"].toObject();
+    c.transition.type = tr["type"].toString();
+    c.transition.duration = TimeUs(tr["duration"].toDouble());
+    c.stabilize = o["stabilize"].toBool();
     return c;
 }
 
@@ -77,6 +147,20 @@ QJsonObject fxToJson(const AudioFx &fx)
     o["compThreshold"] = fx.thresholdDb;
     o["compRatio"] = fx.ratio;
     o["dialogueCleanup"] = fx.dialogueCleanup;
+    o["gate"] = fx.gateEnabled;
+    o["gateThreshold"] = fx.gateThresholdDb;
+    o["deEsser"] = fx.deEsser;
+    o["pitch"] = fx.pitchSemitones;
+    o["reverb"] = fx.reverbEnabled;
+    o["reverbMix"] = fx.reverbMix;
+    o["reverbSize"] = fx.reverbSize;
+    o["echo"] = fx.echoEnabled;
+    o["echoDelay"] = fx.echoDelayMs;
+    o["echoFeedback"] = fx.echoFeedback;
+    o["limiter"] = fx.limiterEnabled;
+    o["limiterCeiling"] = fx.limiterCeilingDb;
+    o["duck"] = fx.duckUnderVoice;
+    o["duckAmount"] = fx.duckAmountDb;
     return o;
 }
 
@@ -91,6 +175,20 @@ AudioFx fxFromJson(const QJsonObject &o)
     fx.thresholdDb = o["compThreshold"].toDouble(-18.0);
     fx.ratio = o["compRatio"].toDouble(3.0);
     fx.dialogueCleanup = o["dialogueCleanup"].toBool();
+    fx.gateEnabled = o["gate"].toBool();
+    fx.gateThresholdDb = o["gateThreshold"].toDouble(-45.0);
+    fx.deEsser = o["deEsser"].toBool();
+    fx.pitchSemitones = o["pitch"].toDouble(0.0);
+    fx.reverbEnabled = o["reverb"].toBool();
+    fx.reverbMix = o["reverbMix"].toDouble(0.3);
+    fx.reverbSize = o["reverbSize"].toDouble(0.5);
+    fx.echoEnabled = o["echo"].toBool();
+    fx.echoDelayMs = o["echoDelay"].toDouble(350.0);
+    fx.echoFeedback = o["echoFeedback"].toDouble(0.35);
+    fx.limiterEnabled = o["limiter"].toBool();
+    fx.limiterCeilingDb = o["limiterCeiling"].toDouble(-1.0);
+    fx.duckUnderVoice = o["duck"].toBool();
+    fx.duckAmountDb = o["duckAmount"].toDouble(-12.0);
     return fx;
 }
 
@@ -211,6 +309,8 @@ QJsonObject ProjectData::toJson(const QString &projectDir) const
         o["frameRate"] = m.frameRate;
         o["hasVideo"] = m.hasVideo;
         o["hasAudio"] = m.hasAudio;
+        if (m.isTitle())
+            o["title"] = m.titleDesign;
         mediaArr.append(o);
     }
     root["media"] = mediaArr;
@@ -226,6 +326,8 @@ QJsonObject ProjectData::toJson(const QString &projectDir) const
         o["locked"] = t.locked;
         o["volume"] = t.volume;
         o["pan"] = t.pan;
+        if (t.voice)
+            o["voice"] = true;
         if (t.isAudio())
             o["fx"] = fxToJson(t.fx);
         QJsonArray clips;
@@ -293,6 +395,7 @@ bool ProjectData::fromJson(const QJsonObject &root, ProjectData *out, QString *e
         m.frameRate = o["frameRate"].toDouble();
         m.hasVideo = o["hasVideo"].toBool();
         m.hasAudio = o["hasAudio"].toBool();
+        m.titleDesign = o["title"].toObject();
         d.media.append(m);
     }
 
@@ -307,6 +410,7 @@ bool ProjectData::fromJson(const QJsonObject &root, ProjectData *out, QString *e
         t.locked = o["locked"].toBool();
         t.volume = o["volume"].toDouble(1.0);
         t.pan = o["pan"].toDouble(0.0);
+        t.voice = o["voice"].toBool();
         t.fx = fxFromJson(o["fx"].toObject());
         for (const auto &cv : o["clips"].toArray())
             t.clips.append(clipFromJson(cv.toObject()));

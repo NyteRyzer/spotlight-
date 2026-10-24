@@ -14,6 +14,9 @@ add_library(spotlight_core STATIC
     exporter.h exporter.cpp
     shortcuts.h shortcuts.cpp
     imageops.h imageops.cpp
+    looks.h looks.cpp
+    titles.h titles.cpp
+    analysis.h analysis.cpp
     designrender.h designrender.cpp
 )
 

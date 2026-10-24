@@ -9,13 +9,17 @@
 
 namespace spotlight {
 
+struct GraphBuilder;
+
 // Renders the timeline to a file using FFmpeg.
 //
-// The timeline is flattened into an FFmpeg filter graph: video segments (top
-// visible track wins, gaps are black) are scaled/padded to the output size and
-// concatenated; audio clips are delayed to their timeline position, mixed per
-// track, run through the track's effects (EQ, compressor, dialogue cleanup),
-// volume and pan, then mixed to the master bus.
+// The timeline is turned into an FFmpeg filter graph: each visible video track
+// becomes a full-frame stream (clips fitted, colour-graded, keyed, cropped,
+// transformed and animated; transparent gaps; xfade transitions) and the
+// tracks are overlaid bottom to top over black; audio clips are delayed to their timeline position, mixed per
+// track, run through the track's effects (cleanup, gate, de-esser, EQ,
+// compressor, pitch, echo, reverb, limiter), volume, ducking and pan, then
+// mixed to the master bus.
 class Exporter : public QObject {
     Q_OBJECT
 public:
@@ -50,6 +54,9 @@ signals:
 
 private:
     void readProgress();
+    // Appends one video track's filter chains; returns its output label.
+    static QString buildVideoTrack(GraphBuilder &g, const ProjectData &d, const Track &t, int trackIndex,
+                                   const QSize &frame, double fps);
 
     QProcess *m_process = nullptr;
     qint64 m_totalUs = 0;

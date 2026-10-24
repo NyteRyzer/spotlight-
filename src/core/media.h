@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 
+#include <QJsonObject>
 #include <QSize>
 #include <QString>
 #include <QUuid>
@@ -21,8 +22,12 @@ struct MediaItem {
     double frameRate = 0;  // 0 if unknown
     bool hasVideo = false;
     bool hasAudio = false;
+    // Titles are transparent PNGs rendered from a design document kept here
+    // so they can be re-edited (and re-rendered if the PNG goes missing).
+    QJsonObject titleDesign;
 
     bool isStill() const { return kind == MediaKind::Image; }
+    bool isTitle() const { return !titleDesign.isEmpty(); }
 };
 
 inline QString mediaKindToString(MediaKind k)

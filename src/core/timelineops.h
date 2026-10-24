@@ -109,4 +109,42 @@ TimeUs previousMarker(const ProjectData &d, TimeUs t);
 // points those media items at them. Returns the number relinked.
 int relinkMissingMedia(ProjectData &d, const QString &folder);
 
+// ---- Pro editing ------------------------------------------------------
+// Opens a gap of `duration` at `at` on every unlocked track: clips under `at`
+// are split and everything from `at` on moves right (insert edit).
+void insertGap(ProjectData &d, TimeUs at, TimeUs duration);
+
+// Insert edit: like placeMedia, but pushes later material right instead of
+// overwriting it. Returns the primary clip id.
+QUuid insertMedia(ProjectData &d, const QUuid &mediaId, int trackIndex, TimeUs at, TimeUs in = 0, TimeUs out = -1);
+
+// Removes [from, to) from every unlocked track and closes the gap.
+void rippleDeleteRange(ProjectData &d, TimeUs from, TimeUs to);
+// Ripple-deletes several ranges (e.g. detected silences); ranges may be in
+// any order and may overlap. Returns the total time removed.
+TimeUs rippleDeleteRanges(ProjectData &d, QVector<QPair<TimeUs, TimeUs>> ranges);
+
+// Changes the playback speed of a clip (and linked partners), keeping its
+// start. If the clip gets longer, later clips on the same tracks move right
+// to make room. Stills ignore speed.
+bool setClipSpeed(ProjectData &d, const QUuid &clipId, double speed);
+
+// Moves every clip on the track left so there are no gaps (CapCut's
+// "magnetic" track). Linked partners move with them. Returns clips moved.
+int closeGaps(ProjectData &d, int trackIndex);
+
+// Adds a marker on every beat (or every bar) between from and to.
+// Returns the number of markers added.
+int addBeatMarkers(ProjectData &d, double bpm, TimeUs offset, TimeUs from, TimeUs to, int beatsPerBar,
+                   bool barsOnly);
+
+// Freeze frame: splits the clip at `at` and inserts `stillMediaId` (a frame
+// grabbed at `at`) for `duration`, pushing later material right. The still
+// inherits the clip's look and transform. Returns the still clip's id.
+QUuid insertFreezeFrame(ProjectData &d, const QUuid &clipId, TimeUs at, const QUuid &stillMediaId,
+                        TimeUs duration);
+
+// Splits a clip (and partners) at every time in `cuts` that falls inside it.
+int splitAtTimes(ProjectData &d, const QUuid &clipId, const QVector<TimeUs> &cuts);
+
 } // namespace spotlight::timeline

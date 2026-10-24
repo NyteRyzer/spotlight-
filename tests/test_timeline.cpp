@@ -1,4 +1,7 @@
+#include "core/analysis.h"
+#include "core/looks.h"
 #include "core/timelineops.h"
+#include "core/titles.h"
 #include "testutil.h"
 
 #include <QtTest>
@@ -358,6 +361,179 @@ private slots:
         QCOMPARE(timeline::relinkMissingMedia(d, tmp.path()), 1);
         QCOMPARE(d.media[0].path, QFileInfo(tmp.path() + "/deep/inside/Clip.MP4").absoluteFilePath());
         QCOMPARE(d.media[1].path, QStringLiteral("/old/drive/gone.mp4"));
+    }
+
+
+    // ---- Pro editing ----------------------------------------------------
+    void speedChangesDurationAndSourceMapping()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 20 * S);
+        const QUuid a = timeline::placeMedia(d, m, 0, 0, 0, 4 * S);
+        const QUuid b = timeline::placeMedia(d, m, 0, 4 * S, 0, 2 * S);
+        QVERIFY(timeline::setClipSpeed(d, a, 0.5)); // 4 s of source now lasts 8 s
+        const Clip *ca = d.clipById(a);
+        QCOMPARE(ca->duration(), 8 * S);
+        QCOMPARE(ca->sourceAt(2 * S), S);
+        // The following clip (and its linked audio) moved right to make room.
+        QCOMPARE(d.clipById(b)->start, 8 * S);
+        QCOMPARE(d.tracks[2].clips[1].start, 8 * S);
+        checkInvariants(d);
+
+        // Splitting a slowed clip maps the cut into source time.
+        const QVector<QUuid> right = timeline::splitClips(d, {a}, 3 * S);
+        QCOMPARE(right.size(), 2);
+        QCOMPARE(d.clipById(right[0])->in, 1500 * kUsPerMs);
+        QCOMPARE(d.clipById(right[0])->speed, 0.5);
+        checkInvariants(d);
+
+        // Trimming the tail by 2 s of timeline removes 1 s of source.
+        const TimeUs out = d.clipById(right[0])->out;
+        QVERIFY(timeline::trimClipEnd(d, right[0], d.clipById(right[0])->end() - 2 * S));
+        QCOMPARE(d.clipById(right[0])->out, out - S);
+        checkInvariants(d);
+    }
+
+    void insertEditPushesLaterClips()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 10 * S);
+        const QUuid a = timeline::placeMedia(d, m, 0, 0, 0, 6 * S);
+        const QUuid ins = timeline::insertMedia(d, m, 0, 2 * S, 0, 3 * S);
+        QVERIFY(!ins.isNull());
+        // a was split at 2 s; its right half now starts after the insert.
+        QCOMPARE(d.clipById(a)->end(), 2 * S);
+        QCOMPARE(d.clipById(ins)->start, 2 * S);
+        QCOMPARE(d.tracks[0].clips.size(), 3);
+        QCOMPARE(d.tracks[0].clips[2].start, 5 * S);
+        QCOMPARE(d.tracks[0].clips[2].in, 2 * S);
+        QCOMPARE(d.duration(), 9 * S);
+        checkInvariants(d);
+    }
+
+    void rippleDeleteRangesRemovesSilences()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 10 * S);
+        timeline::placeMedia(d, m, 0, 0, 0, 10 * S);
+        const TimeUs removed = timeline::rippleDeleteRanges(d, {{6 * S, 7 * S}, {S, 2 * S}, {1500 * kUsPerMs, 3 * S}});
+        QCOMPARE(removed, 3 * S); // [1,3) merged + [6,7)
+        QCOMPARE(d.duration(), 7 * S);
+        QCOMPARE(d.tracks[0].clips.size(), 3);
+        QCOMPARE(d.tracks[2].clips.size(), 3); // linked audio cut identically
+        QCOMPARE(d.tracks[0].clips[1].start, S);
+        QCOMPARE(d.tracks[0].clips[1].in, 3 * S);
+        checkInvariants(d);
+    }
+
+    void closeGapsMakesTrackMagnetic()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 10 * S, false);
+        timeline::placeMedia(d, m, 0, 2 * S, 0, S);
+        timeline::placeMedia(d, m, 0, 5 * S, 0, 2 * S);
+        QCOMPARE(timeline::closeGaps(d, 0), 2);
+        QCOMPARE(d.tracks[0].clips[0].start, 0);
+        QCOMPARE(d.tracks[0].clips[1].start, S);
+        QCOMPARE(d.duration(), 3 * S);
+    }
+
+    void beatMarkers()
+    {
+        ProjectData d = ProjectData::createDefault();
+        // 120 BPM = a beat every 0.5 s.
+        QCOMPARE(timeline::addBeatMarkers(d, 120, 0, 0, 4 * S, 4, false), 8);
+        QCOMPARE(d.markers[1].time, 500 * kUsPerMs);
+        QCOMPARE(d.markers[0].name, QStringLiteral("Bar 1"));
+        QCOMPARE(d.markers[4].name, QStringLiteral("Bar 2"));
+        // Bars only, offset grid; existing markers aren't duplicated.
+        ProjectData e = ProjectData::createDefault();
+        QCOMPARE(timeline::addBeatMarkers(e, 120, 250 * kUsPerMs, 0, 5 * S, 4, true), 3);
+        QCOMPARE(e.markers[0].time, 250 * kUsPerMs);
+        QCOMPARE(timeline::addBeatMarkers(e, 120, 250 * kUsPerMs, 0, 5 * S, 4, true), 0);
+    }
+
+    void freezeFrameInsertsStill()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 10 * S);
+        const QUuid still = addImage(d);
+        const QUuid a = timeline::placeMedia(d, m, 0, 0, 0, 4 * S);
+        d.clipById(a)->color.saturation = 0.2;
+        const QUuid f = timeline::insertFreezeFrame(d, a, 2 * S, still, S);
+        QVERIFY(!f.isNull());
+        QCOMPARE(d.clipById(f)->start, 2 * S);
+        QCOMPARE(d.clipById(f)->duration(), S);
+        QCOMPARE(d.clipById(f)->color.saturation, 0.2);
+        QCOMPARE(d.duration(), 5 * S);
+        QCOMPARE(d.tracks[0].clips.size(), 3);
+        QCOMPARE(d.tracks[2].clips[1].start, 3 * S); // audio continues after the freeze
+        checkInvariants(d);
+    }
+
+    void splitAtSceneTimes()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 10 * S);
+        const QUuid a = timeline::placeMedia(d, m, 0, S, 0, 8 * S);
+        QCOMPARE(timeline::splitAtTimes(d, a, {3 * S, 6 * S, 20 * S}), 2);
+        QCOMPARE(d.tracks[0].clips.size(), 3);
+        QCOMPARE(d.tracks[2].clips.size(), 3);
+        checkInvariants(d);
+    }
+
+    void analysisParsing()
+    {
+        const QString log = "[silencedetect @ 0x1] silence_start: 1.5\n"
+                            "[silencedetect @ 0x1] silence_end: 2.75 | silence_duration: 1.25\n"
+                            "[silencedetect @ 0x1] silence_start: 8.2\n";
+        const auto s = analysis::parseSilences(log, 10 * S);
+        QCOMPARE(s.size(), 2);
+        QCOMPARE(s[0].first, 1500 * kUsPerMs);
+        QCOMPARE(s[0].second, 2750 * kUsPerMs);
+        QCOMPARE(s[1].second, 10 * S); // open silence runs to the end
+        const auto padded = analysis::padRanges(s, 100 * kUsPerMs, 500 * kUsPerMs);
+        QCOMPARE(padded.size(), 2);
+        QCOMPARE(padded[0].first, 1600 * kUsPerMs);
+
+        const auto scenes = analysis::parseScenes("[scdet @ 0x2] lavfi.scd.score: 52.1, lavfi.scd.time: 2.04\n"
+                                                  "[scdet @ 0x2] lavfi.scd.score: 40.0, lavfi.scd.time: 5.5\n");
+        QCOMPARE(scenes, (QVector<TimeUs>{2040 * kUsPerMs, 5500 * kUsPerMs}));
+    }
+
+    void srtRoundTrip()
+    {
+        const QString srt = QString::fromUtf8("\xEF\xBB\xBF" "1\r\n00:00:01,000 --> 00:00:02,500\r\nHello <i>world</i>\r\n\r\n"
+                                              "2\n00:01:00,250 --> 00:01:02,000\nTwo\nlines\n");
+        const auto caps = titles::parseSrt(srt);
+        QCOMPARE(caps.size(), 2);
+        QCOMPARE(caps[0].start, S);
+        QCOMPARE(caps[0].end, 2500 * kUsPerMs);
+        QCOMPARE(caps[0].text, QStringLiteral("Hello world"));
+        QCOMPARE(caps[1].text, QStringLiteral("Two\nlines"));
+        const auto back = titles::parseSrt(titles::toSrt(caps));
+        QCOMPARE(back.size(), 2);
+        QCOMPARE(back[1].start, 60 * S + 250 * kUsPerMs);
+        QCOMPARE(back[1].text, caps[1].text);
+    }
+
+    void colorMatrixAndMotion()
+    {
+        ColorAdjust c;
+        const ColorMatrix id = colorMatrix(c);
+        QCOMPARE(id[0], 1.0);
+        QCOMPARE(id[1], 0.0);
+        c.mono = MonoMode::BlackWhite;
+        const ColorMatrix bw = colorMatrix(c);
+        QVERIFY(qFuzzyCompare(bw[0], bw[3]) && qFuzzyCompare(bw[1], bw[4])); // rows equal = grey
+        c.mono = MonoMode::None;
+        c.temperature = 1;
+        QVERIFY(colorMatrix(c)[0] > 1.0 && colorMatrix(c)[8] < 1.0);
+
+        QCOMPARE(motionAt(Motion::ZoomIn, 0).zoom, 1.0);
+        QCOMPARE(motionAt(Motion::ZoomIn, 1).zoom, 1.0 + kMotionAmount);
+        QVERIFY(motionAt(Motion::PanLeft, 0).dx > 0 && motionAt(Motion::PanLeft, 1).dx < 0);
+        QCOMPARE(fitSize(QSize(1000, 1000), QSize(1920, 1080)), QSize(1080, 1080));
     }
 
     void timecode()

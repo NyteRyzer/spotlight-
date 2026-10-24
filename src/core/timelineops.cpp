@@ -100,7 +100,7 @@ void clearRange(Track &track, TimeUs from, TimeUs to)
         // Left remainder.
         if (c.start < from) {
             Clip left = c;
-            left.out = c.in + (from - c.start);
+            left.out = c.in + c.toSource(from - c.start);
             left.fadeOut = 0;
             if (left.duration() >= kMinClipDuration)
                 result.append(left);
@@ -110,7 +110,7 @@ void clearRange(Track &track, TimeUs from, TimeUs to)
             Clip right = c;
             const TimeUs cut = to - c.start;
             right.start = to;
-            right.in = c.in + cut;
+            right.in = c.in + c.toSource(cut);
             right.fadeIn = 0;
             if (c.start < from) {
                 // The clip was split in two; the right part is a new clip.
@@ -272,7 +272,7 @@ bool trimClipStart(ProjectData &d, const QUuid &clipId, TimeUs newStart)
         hi = std::min(hi, c->duration() - kMinClipDuration);
         lo = std::max(lo, prevEnd(d.tracks[ti], *c) - c->start);
         if (!isStillClip(d, *c))
-            lo = std::max(lo, -c->in);
+            lo = std::max(lo, -c->toTimeline(c->in));
     }
     if (lo > hi)
         return false;
@@ -286,7 +286,7 @@ bool trimClipStart(ProjectData &d, const QUuid &clipId, TimeUs newStart)
         if (isStillClip(d, *c))
             c->out -= delta; // stills have no source bounds; keep in at 0
         else
-            c->in += delta;
+            c->in += c->toSource(delta);
         c->fadeIn = std::min(c->fadeIn, c->duration());
     }
     return true;
@@ -313,7 +313,7 @@ bool trimClipEnd(ProjectData &d, const QUuid &clipId, TimeUs newEnd)
             hi = std::min(hi, ns - c->end());
         const TimeUs limit = mediaLimit(d, *c);
         if (limit != std::numeric_limits<TimeUs>::max())
-            hi = std::min(hi, limit - c->out);
+            hi = std::min(hi, c->toTimeline(limit - c->out));
     }
     if (lo > hi)
         return false;
@@ -323,7 +323,7 @@ bool trimClipEnd(ProjectData &d, const QUuid &clipId, TimeUs newEnd)
 
     for (const auto &id : group) {
         Clip *c = d.clipById(id);
-        c->out += delta;
+        c->out += c->toSource(delta);
         c->fadeOut = std::min(c->fadeOut, c->duration());
     }
     return true;
@@ -352,7 +352,7 @@ QVector<QUuid> splitClips(ProjectData &d, const QVector<QUuid> &clipIds, TimeUs 
         Clip right = *c;
         right.id = QUuid::createUuid();
         right.start = at;
-        right.in = c->in + (at - c->start);
+        right.in = c->sourceAt(at);
         right.fadeIn = 0;
         if (!c->linkId.isNull()) {
             if (!newLinks.contains(c->linkId))
@@ -656,6 +656,226 @@ int relinkMissingMedia(ProjectData &d, const QString &folder)
         wanted.erase(w);
     }
     return relinked;
+}
+
+// ---- Pro editing ------------------------------------------------------
+
+void insertGap(ProjectData &d, TimeUs at, TimeUs duration)
+{
+    if (duration <= 0)
+        return;
+    splitAll(d, at);
+    for (auto &t : d.tracks) {
+        if (t.locked)
+            continue;
+        for (auto &c : t.clips) {
+            if (c.start >= at)
+                c.start += duration;
+        }
+    }
+}
+
+QUuid insertMedia(ProjectData &d, const QUuid &mediaId, int trackIndex, TimeUs at, TimeUs in, TimeUs out)
+{
+    const MediaItem *m = d.mediaById(mediaId);
+    if (!m)
+        return {};
+    TimeUs len;
+    if (m->isStill()) {
+        len = out > 0 ? out : kDefaultStillDuration;
+    } else {
+        const TimeUs o = out < 0 ? m->duration : std::min(out, m->duration);
+        len = o - std::clamp<TimeUs>(in, 0, m->duration);
+    }
+    if (len < kMinClipDuration)
+        return {};
+    at = std::max<TimeUs>(0, at);
+    insertGap(d, at, len);
+    return placeMedia(d, mediaId, trackIndex, at, in, out);
+}
+
+void rippleDeleteRange(ProjectData &d, TimeUs from, TimeUs to)
+{
+    if (to <= from)
+        return;
+    const TimeUs len = to - from;
+    for (auto &t : d.tracks) {
+        if (t.locked)
+            continue;
+        clearRange(t, from, to);
+        for (auto &c : t.clips) {
+            if (c.start >= to)
+                c.start -= len;
+        }
+    }
+}
+
+TimeUs rippleDeleteRanges(ProjectData &d, QVector<QPair<TimeUs, TimeUs>> ranges)
+{
+    std::sort(ranges.begin(), ranges.end());
+    // Merge overlaps, then delete from the end so earlier times stay valid.
+    QVector<QPair<TimeUs, TimeUs>> merged;
+    for (const auto &r : ranges) {
+        if (r.second <= r.first)
+            continue;
+        if (!merged.isEmpty() && r.first <= merged.last().second)
+            merged.last().second = std::max(merged.last().second, r.second);
+        else
+            merged.append(r);
+    }
+    TimeUs removed = 0;
+    for (int i = merged.size() - 1; i >= 0; --i) {
+        rippleDeleteRange(d, merged[i].first, merged[i].second);
+        removed += merged[i].second - merged[i].first;
+    }
+    return removed;
+}
+
+bool setClipSpeed(ProjectData &d, const QUuid &clipId, double speed)
+{
+    speed = std::clamp(speed, 0.1, 8.0);
+    const QVector<QUuid> group = groupOf(d, clipId);
+    bool changed = false;
+    for (const auto &id : group) {
+        int ti = -1;
+        Clip *c = d.clipById(id, &ti);
+        if (!c || d.tracks[ti].locked || isStillClip(d, *c) || qFuzzyCompare(c->speed, speed))
+            continue;
+        const TimeUs oldEnd = c->end();
+        const TimeUs start = c->start;
+        const QUuid cid = c->id;
+        c->speed = speed;
+        const TimeUs newEnd = c->end();
+        c->fadeIn = std::min(c->fadeIn, c->duration());
+        c->fadeOut = std::min(c->fadeOut, c->duration());
+        c->transition.duration = std::min(c->transition.duration, c->duration());
+        changed = true;
+        if (newEnd > oldEnd) {
+            // Push following clips right just enough to make room.
+            Track &t = d.tracks[ti];
+            TimeUs firstAfter = std::numeric_limits<TimeUs>::max();
+            for (const auto &o : t.clips) {
+                if (o.id != cid && o.start >= start && o.start < firstAfter)
+                    firstAfter = o.start;
+            }
+            if (firstAfter != std::numeric_limits<TimeUs>::max() && firstAfter < newEnd) {
+                const TimeUs push = newEnd - firstAfter;
+                for (auto &o : t.clips) {
+                    if (o.id != cid && o.start >= firstAfter)
+                        o.start += push;
+                }
+            }
+        }
+    }
+    return changed;
+}
+
+int closeGaps(ProjectData &d, int trackIndex)
+{
+    if (trackIndex < 0 || trackIndex >= d.tracks.size() || d.tracks[trackIndex].locked)
+        return 0;
+    int moved = 0;
+    TimeUs cursor = 0;
+    // Work on a copy of the ids: moveClip re-sorts the track.
+    QVector<QUuid> ids;
+    for (const auto &c : d.tracks[trackIndex].clips)
+        ids.append(c.id);
+    for (const auto &id : ids) {
+        const Clip *c = d.clipById(id);
+        if (!c)
+            continue;
+        if (c->start > cursor) {
+            if (moveClip(d, id, cursor, trackIndex))
+                ++moved;
+            c = d.clipById(id);
+        }
+        cursor = c->end();
+    }
+    return moved;
+}
+
+int addBeatMarkers(ProjectData &d, double bpm, TimeUs offset, TimeUs from, TimeUs to, int beatsPerBar, bool barsOnly)
+{
+    if (bpm < 20 || bpm > 400 || to <= from)
+        return 0;
+    beatsPerBar = std::max(1, beatsPerBar);
+    const double beatUs = 60.0 * kUsPerSecond / bpm;
+    const double stepUs = barsOnly ? beatUs * beatsPerBar : beatUs;
+    // First beat at or after `from` on the grid anchored at `offset`.
+    const double k0 = std::ceil((from - offset) / stepUs);
+    int added = 0;
+    for (double k = k0;; k += 1.0) {
+        const TimeUs t = offset + TimeUs(std::llround(k * stepUs));
+        if (t >= to)
+            break;
+        if (t < 0)
+            continue;
+        const qint64 beatIndex = std::llround((t - offset) / beatUs);
+        const bool downbeat = beatIndex % beatsPerBar == 0;
+        bool exists = false;
+        for (const auto &m : d.markers) {
+            if (std::abs(m.time - t) < kUsPerMs)
+                exists = true;
+        }
+        if (exists)
+            continue;
+        Marker m;
+        m.id = QUuid::createUuid();
+        m.time = t;
+        m.name = downbeat ? QStringLiteral("Bar %1").arg(beatIndex / beatsPerBar + 1) : QString();
+        d.markers.append(m);
+        ++added;
+    }
+    std::sort(d.markers.begin(), d.markers.end(), [](const Marker &a, const Marker &b) { return a.time < b.time; });
+    return added;
+}
+
+QUuid insertFreezeFrame(ProjectData &d, const QUuid &clipId, TimeUs at, const QUuid &stillMediaId, TimeUs duration)
+{
+    int ti = -1;
+    const Clip *c = d.clipById(clipId, &ti);
+    if (!c || !d.tracks[ti].isVideo() || d.tracks[ti].locked || !c->contains(at) || !d.mediaById(stillMediaId))
+        return {};
+    const Clip look = *c;
+    const QUuid trackId = d.tracks[ti].id;
+    insertGap(d, at, duration);
+    const int track = d.trackIndex(trackId);
+    const QUuid id = placeMedia(d, stillMediaId, track, at, 0, duration);
+    if (Clip *still = d.clipById(id)) {
+        still->color = look.color;
+        still->transform = look.transform;
+        still->key = look.key;
+    }
+    return id;
+}
+
+int splitAtTimes(ProjectData &d, const QUuid &clipId, const QVector<TimeUs> &cuts)
+{
+    QVector<TimeUs> sorted = cuts;
+    std::sort(sorted.begin(), sorted.end());
+    int n = 0;
+    QUuid current = clipId;
+    for (TimeUs t : sorted) {
+        const Clip *c = d.clipById(current);
+        if (!c)
+            break;
+        if (!c->contains(t))
+            continue;
+        const QVector<QUuid> created = splitClips(d, {current}, t);
+        // Continue with the right-hand piece of the primary clip.
+        for (const auto &id : created) {
+            int ti = -1;
+            int pti = -1;
+            d.clipById(id, &ti);
+            d.clipById(clipId, &pti);
+            if (ti == pti) {
+                current = id;
+                ++n;
+                break;
+            }
+        }
+    }
+    return n;
 }
 
 } // namespace spotlight::timeline
