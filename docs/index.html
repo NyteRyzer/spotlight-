@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPOTLIGHT! — Edit video, mix audio, design thumbnails</title>
+<meta name="description" content="A free desktop studio for creators: Premiere-style video editing, Logic-style audio mixing and Photoshop-style thumbnail design in one app. macOS and Linux.">
+<meta property="og:title" content="SPOTLIGHT! — one free app for video, audio & thumbnails">
+<meta property="og:description" content="Multitrack editing, transitions, titles, green screen, auto-ducking, voiceover recording and a layered thumbnail designer. macOS & Linux.">
+<meta property="og:image" content="https://nyteryzer.github.io/spotlight-/screenshots/social-preview.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nyteryzer.github.io/spotlight-/screenshots/social-preview.png">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0e0e11; --panel: #17171c; --line: #2a2a33; --text: #ececf2; --dim: #9a9aa8;
+  --accent: #ffc400; --accent2: #ff6a00;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; line-height: 1.55; }
+a { color: var(--accent); text-decoration: none; }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 20px; }
+header { position: relative; overflow: hidden; padding: 72px 0 40px; }
+header::before { content: ""; position: absolute; inset: -40% 40% 30% -20%; background: radial-gradient(closest-side, rgba(255,170,0,.28), transparent); }
+header::after { content: ""; position: absolute; inset: 30% -20% -40% 55%; background: radial-gradient(closest-side, rgba(120,60,220,.25), transparent); }
+.hero { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr; gap: 40px; align-items: center; }
+@media (min-width: 900px) { .hero { grid-template-columns: 5fr 7fr; } }
+.logo { display: flex; align-items: center; gap: 14px; }
+.logo img { width: 56px; height: 56px; border-radius: 14px; }
+h1 { font-size: clamp(44px, 7vw, 76px); font-weight: 900; color: var(--accent); margin: 18px 0 8px; letter-spacing: -1px; line-height: 1; }
+.tag { font-size: clamp(20px, 2.4vw, 26px); font-weight: 600; margin: 0 0 16px; }
+.sub { color: var(--dim); font-size: 17px; margin: 0 0 28px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 20px; border-radius: 12px; font-weight: 700; font-size: 15px; border: 1px solid var(--line); background: var(--panel); color: var(--text); transition: transform .12s, border-color .12s; }
+.btn:hover { transform: translateY(-2px); border-color: var(--accent); }
+.btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #141414; border: 0; }
+.note { color: var(--dim); font-size: 13px; margin-top: 12px; }
+.shot { width: 100%; border-radius: 14px; border: 1px solid rgba(255,196,0,.5); box-shadow: 0 30px 80px rgba(0,0,0,.6); display: block; }
+section { padding: 56px 0; }
+h2 { font-size: clamp(28px, 4vw, 38px); font-weight: 800; margin: 0 0 10px; }
+.lead { color: var(--dim); margin: 0 0 32px; font-size: 17px; }
+.studio { display: grid; grid-template-columns: 1fr; gap: 28px; align-items: center; margin-bottom: 64px; }
+@media (min-width: 900px) { .studio { grid-template-columns: 1fr 1fr; } .studio.flip > :first-child { order: 2; } }
+.studio h3 { font-size: 26px; margin: 0 0 4px; }
+.like { color: var(--accent); font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: .08em; }
+ul.feat { list-style: none; padding: 0; margin: 14px 0 0; }
+ul.feat li { padding: 6px 0 6px 28px; position: relative; color: #d7d7e0; }
+ul.feat li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 800; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+.card b { display: block; margin-bottom: 6px; font-size: 16px; }
+.card span { color: var(--dim); font-size: 14px; }
+.dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.dl .card { display: flex; flex-direction: column; gap: 10px; }
+.dl .os { font-size: 30px; }
+footer { border-top: 1px solid var(--line); padding: 30px 0 50px; color: var(--dim); font-size: 14px; }
+code { background: #22222a; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap hero">
+    <div>
+      <div class="logo"><img src="icon.png" alt=""><strong style="font-size:18px;letter-spacing:.06em">SPOTLIGHT!</strong></div>
+      <h1>One app.<br>Video, audio &amp; thumbnails.</h1>
+      <p class="tag">Edit like Premiere and CapCut. Mix like Logic. Design like Photoshop.</p>
+      <p class="sub">A free desktop studio for creators. Cut your video, clean up and mix the audio, then design the
+        thumbnail from a frame of the same project, without switching apps.</p>
+      <div class="buttons">
+        <a class="btn primary" href="https://github.com/NyteRyzer/spotlight-/releases/latest">⬇ Download free</a>
+        <a class="btn" href="https://github.com/NyteRyzer/spotlight-">★ View on GitHub</a>
+      </div>
+      <p class="note">macOS 12+ (Apple Silicon &amp; Intel) · Linux AppImage &amp; .deb · FFmpeg included</p>
+    </div>
+    <img class="shot" src="screenshots/video-studio.png" alt="SPOTLIGHT! Video Studio with picture-in-picture, a lower third title and transitions">
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Three studios, one project</h2>
+    <p class="lead">Everything shares one timeline, one media bin and one undo history, and it is all autosaved.</p>
+
+    <div class="studio">
+      <img class="shot" src="screenshots/video-studio.png" alt="Video Studio">
+      <div>
+        <div class="like">Premiere · CapCut · Filmora</div>
+        <h3>🎬 Video Studio</h3>
+        <ul class="feat">
+          <li>Multitrack timeline with insert, overwrite, ripple and razor edits</li>
+          <li>Layered compositing: picture-in-picture, split screen and overlays</li>
+          <li>16 transitions: dissolves, wipes, slides, iris and zoom</li>
+          <li>Titles and lower thirds in 8 styles, plus SRT captions</li>
+          <li>Speed 0.1×–8×, reverse and freeze frame</li>
+          <li>One-click looks, color controls, green screen and Ken Burns</li>
+          <li>Remove silences, scene detection, beat markers, auto reframe to 9:16</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="studio flip">
+      <img class="shot" src="screenshots/audio-studio.png" alt="Audio Studio">
+      <div>
+        <div class="like">Logic Pro</div>
+        <h3>🎚 Audio Studio</h3>
+        <ul class="feat">
+          <li>Waveform timeline and mixer with volume, pan, mute and solo</li>
+          <li>Denoise, noise gate, de-esser, EQ, compressor and limiter</li>
+          <li>Voice changer, reverb and echo</li>
+          <li>Auto-ducking: the music drops under your voice automatically</li>
+          <li>Record voiceovers while the timeline plays</li>
+          <li>Loudness targets for YouTube (−14 LUFS) and podcasts (−16 LUFS)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="studio">
+      <img class="shot" src="screenshots/design-studio.png" alt="Design Studio">
+      <div>
+        <div class="like">Photoshop</div>
+        <h3>🎨 Design Studio</h3>
+        <ul class="feat">
+          <li>Layers of images, text, shapes and brush drawings</li>
+          <li>Blend modes, drop shadow, outer glow and stroke</li>
+          <li>Background removal, crop, fade masks, hue, blur and B&amp;W</li>
+          <li>Thumbnail templates and YouTube safe-zone guides</li>
+          <li>Grab any video frame, and send any design back to the timeline</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:#121216">
+  <div class="wrap">
+    <h2>Built for creators</h2>
+    <p class="lead">The tools you reach for every upload, without the subscription.</p>
+    <div class="grid">
+      <div class="card"><b>✂️ Jump cuts in one click</b><span>Remove Silences finds the pauses in your talking head and cuts them out, keeping every track in sync.</span></div>
+      <div class="card"><b>📱 Shorts-ready</b><span>Auto Reframe turns a 16:9 edit into 9:16, 1:1 or 4:5. Export presets cover YouTube, TikTok, Reels and Instagram.</span></div>
+      <div class="card"><b>🎵 Cut on the beat</b><span>Drop beat markers at your song's BPM, or tap the tempo, and clips snap to them.</span></div>
+      <div class="card"><b>👀 The preview matches the export</b><span>The monitor composites tracks, looks, keys and transitions exactly as the renderer does.</span></div>
+      <div class="card"><b>💾 Never lose work</b><span>Autosave, crash recovery, unlimited undo and automatic media relinking.</span></div>
+      <div class="card"><b>⌨️ Your shortcuts</b><span>Remap every shortcut and save custom panel layouts for each studio.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download</h2>
+    <p class="lead">Free. Everything you need is bundled, including FFmpeg.</p>
+    <div class="dl">
+      <div class="card"><div class="os"></div><b>macOS · Apple Silicon</b><span>macOS 14 or newer</span>
+        <a class="btn primary" href="https://github.com/NyteRyzer/spotlight-/releases/latest">Download .dmg</a></div>
+      <div class="card"><div class="os"></div><b>macOS · Intel</b><span>macOS 12 or newer</span>
+        <a class="btn primary" href="https://github.com/NyteRyzer/spotlight-/releases/latest">Download .dmg</a></div>
+      <div class="card"><div class="os">🐧</div><b>Linux · AppImage</b><span>Any 2024+ x86_64 distro: <code>chmod +x</code> and run</span>
+        <a class="btn primary" href="https://github.com/NyteRyzer/spotlight-/releases/latest">Download AppImage</a></div>
+      <div class="card"><div class="os">📦</div><b>Ubuntu / Debian</b><span><code>sudo apt install ./spotlight-*.deb</code></span>
+        <a class="btn" href="https://github.com/NyteRyzer/spotlight-/releases/latest">Download .deb</a></div>
+    </div>
+    <p class="note">The macOS builds aren't notarized yet. On first launch, open <b>System Settings → Privacy &amp; Security</b> and click <b>Open Anyway</b>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">SPOTLIGHT! · Built with Qt and FFmpeg · <a href="https://github.com/NyteRyzer/spotlight-">Source &amp; issues on GitHub</a></div>
+</footer>
+</body>
+</html>

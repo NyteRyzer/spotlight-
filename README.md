@@ -1,80 +1,101 @@
-# SPOTLIGHT!
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="SPOTLIGHT! — edit video, mix audio and design thumbnails in one free app" width="100%">
+</p>
 
-**SPOTLIGHT!** is an all-in-one creative production studio: edit video, mix audio and design
-thumbnails and channel art in **one project, one window**. It aims to bring the most important
-parts of Premiere Pro, Logic Pro and Photoshop together for YouTubers, podcasters, musicians,
-filmmakers, and anyone else making things.
+<p align="center">
+  <a href="https://github.com/NyteRyzer/spotlight-/releases/latest"><b>⬇ Download for macOS &amp; Linux</b></a> ·
+  <a href="#features">Features</a> ·
+  <a href="#keyboard-shortcuts">Shortcuts</a> ·
+  <a href="#building">Build from source</a>
+</p>
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ SPOTLIGHT!   [ Video Studio ]   Audio Studio   Design Studio             │
-├──────────────────────────────────────────────────────────────────────────┤
-│  one shared project: media bin · timeline · mixer · design document     │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+**SPOTLIGHT!** is a free desktop creative studio for YouTubers, podcasters and editors. It brings the everyday
+features of **Premiere Pro, CapCut, Filmora, Logic Pro and Photoshop** into one app. You edit a video, clean up and
+mix its audio, then design its thumbnail, all in **one project**.
 
-> Status: **Milestone 1 (foundation)**, with early versions of the Audio and Design studios.
-> Builds and tests run on **macOS** and **Linux**. Windows comes in a later stage (see [ROADMAP](docs/ROADMAP.md)).
+| 🎬 Video Studio | 🎚 Audio Studio | 🎨 Design Studio |
+|---|---|---|
+| ![Video Studio](docs/screenshots/video-studio.png) | ![Audio Studio](docs/screenshots/audio-studio.png) | ![Design Studio](docs/screenshots/design-studio.png) |
 
-## What works today
+## Features
 
-### Video Studio
-- Import video, audio and images (file dialog, or drag files from Finder/your file manager)
-- Media bin with thumbnails, duration badges, missing-file markers
-- **Source monitor**: preview clips, mark in/out, *Add to Timeline*
-- **Program monitor**: plays the edited timeline (top video track wins, gaps are black)
-- **Multitrack timeline**: drag to place, move between tracks, trim edges, split at the playhead (`S`),
-  delete / ripple delete, snapping to clip edges and the playhead, zoom, track hide/mute/solo/lock
-- Linked audio/video: a video with sound puts its audio on the matching audio track; edits move both
-- Per-clip **color** (brightness / contrast / saturation) and **dip-to-black** fades, previewed live
-- **Export** with FFmpeg and presets: YouTube 1080p/1080p60/4K, Shorts/Reels vertical, square,
-  H.265 archive, VP9/WebM, plus MP3 / M4A / WAV audio-only. Save your own presets.
+### 🎬 Video Studio (Premiere / CapCut / Filmora)
+- **Multitrack timeline** with move, trim, split (razor), ripple delete, **insert edits**, **close gaps**,
+  snapping, linked audio/video, copy/paste/duplicate and markers.
+- **Layered compositing.** Upper tracks sit on top of lower ones, so you can do **picture-in-picture**,
+  **split screen**, overlays and logos.
+- **Transform** any clip: scale, position, rotation, opacity, flip and crop. One-click PIP and split-screen layouts.
+- **Transitions:** cross dissolve, dip to black/white, wipes, slides, iris, clock wipe, pixelate and zoom.
+- **Titles and lower thirds.** Eight styles: Big Title, Lower Third, Caption, Subscribe Button, Chapter Card, Neon,
+  Breaking News and Quote. They stay editable, with a live preview.
+- **Captions:** import and export **SRT** subtitles.
+- **Speed** from 0.1× to 8× (pitch-preserving audio), **reverse**, and **freeze frame**.
+- **Looks / filters:** Warm, Cool, Vivid, Cinematic, Vintage, Faded, Moody, Dreamy, B&W, Noir and Sepia. You can
+  also fine-tune brightness, contrast, saturation, temperature, tint, vignette and blur.
+- **Chroma key** (green and blue screen), **Ken Burns** zoom and pan, and **stabilization**.
+- **Smart tools:** **Remove Silences** (automatic jump cuts), **Scene Edit Detection**, **beat markers**
+  (BPM or tap tempo) and **Auto Reframe** to 9:16, 1:1 or 4:5 for Shorts, Reels and TikTok.
+- The preview **matches the export**. The Program Monitor composites tracks, looks, keys and transitions the same
+  way the renderer does.
+- **Export presets:** YouTube 1080p/4K, Shorts/Reels/TikTok, Instagram, H.265 archive, WebM, podcast MP3 and
+  WAV. Includes loudness normalization to −14 / −16 LUFS.
 
-### Audio Studio
-- Waveform timeline of the audio tracks (same project as the Video Studio)
-- **Mixer** with per-track volume (dB), pan, mute and solo
-- **Track effects**: 3-band EQ, compressor, and one-click *dialogue cleanup* (rumble filter + FFT noise reduction).
-  Effects are rendered on export; the preview plays the dry signal.
-- Clip gain and fades
+### 🎚 Audio Studio (Logic Pro)
+- Waveform timeline with a **mixer**: volume, pan, mute and solo.
+- Per-track effects: **dialogue cleanup** (denoise), **noise gate**, **de-esser**, **3-band EQ**, **compressor**,
+  **voice changer** (pitch shift), **reverb**, **echo/delay** and **limiter**.
+- **Auto-ducking:** music dips automatically under voice tracks, and you can see and hear it while editing.
+- **Voiceover recording** straight onto a track while the timeline plays.
+- One-click presets: Podcast Voice, Music Bed, Deep Voice, Chipmunk and Big Hall. Plus clip gain, fades and
+  **Normalize**.
 
-### Design Studio
-- Canvas presets: YouTube thumbnail (1280×720), channel art (2560×1440), square/portrait posts, story, A4 poster, custom
-- Layers: images, text (outline + drop shadow), rectangles/ellipses; move and scale on canvas, rotate, opacity
-- Image adjustments (brightness / contrast / saturation)
-- **Capture Frame**: grab the current frame from either monitor and it becomes the thumbnail background
-- Export PNG or JPEG at full canvas resolution
+### 🎨 Design Studio (Photoshop)
+- Layers of images, text, shapes (rectangle, ellipse, triangle, star, arrow, line) and **brush drawings**.
+- **Blend modes:** Multiply, Screen, Overlay, Soft Light, Difference and more. Layers can be flipped, locked and
+  aligned.
+- **Layer effects:** drop shadow, outer glow, and **stroke**. The classic white outline around a cut-out subject is
+  one slider.
+- **Remove background** from solid or studio backdrops. Image adjustments include crop, hue, blur, B&W, invert and
+  **fade masks**.
+- Text with outline, shadow, italic, letter spacing, alignment and caption-style background boxes. Shapes can use
+  gradient fills.
+- **Thumbnail templates**, safe-zone guides (including the YouTube timestamp corner), canvas presets for
+  thumbnails, channel art, posters and stories.
+- **Grab any video frame** as a layer, and send any design **to the timeline** as an intro or end card.
 
-### Everywhere
-- `.spotlight` project files (JSON). Media paths are stored absolute *and* relative, so moving a project folder with its media still works
-- 200-step undo/redo shared by all three studios
-- **Autosave** (default every 2 minutes) and **crash recovery** on next launch
-- **Customizable layouts**: every panel is a dock you can move, float, close; save named layouts per studio; *Window → Reset Layout*
-- **Customizable keyboard shortcuts** (*Edit → Keyboard Shortcuts…*)
-
-## Default shortcuts
-
-| Action | Key | Action | Key |
-|---|---|---|---|
-| Play / Pause | `Space` | Split at playhead | `S` |
-| Previous / next frame | `←` / `→` | Delete / Ripple delete | `Del` / `Shift+Del` |
-| Go to start / end | `Home` / `End` | Zoom in / out / fit | `=` / `-` / `\` |
-| Snapping | `N` | Add selected bin clip at playhead | `.` |
-| Import media | `Ctrl+I` | Export video/audio | `Ctrl+M` |
-| Export design image | `Ctrl+Shift+M` | Capture program frame to design | `Ctrl+Shift+F` |
-| Video / Audio / Design studio | `Ctrl+1` / `2` / `3` | Add text layer | `Ctrl+T` |
-
-(`Ctrl` is `⌘` on macOS.)
+### 🔗 One connected project
+- **Autosave** and crash **recovery**, undo/redo for everything, and relinking of moved media.
+- **Customizable layouts** and **keyboard shortcuts**.
+- Bundled FFmpeg, so there is nothing else to install.
 
 ## Download
 
-Ready-made builds are on the [Releases page](https://github.com/NyteRyzer/spotlight-/releases):
+Get the latest build from the **[Releases page](https://github.com/NyteRyzer/spotlight-/releases/latest)**:
 
 | Platform | File | Notes |
 |---|---|---|
 | macOS 14+ (Apple Silicon) | `SPOTLIGHT-<ver>-macOS-arm64.dmg` | Drag to Applications. Not notarized yet: on first launch use **System Settings → Privacy & Security → Open Anyway**. |
-| macOS 12+ (Intel) | `SPOTLIGHT-<ver>-macOS-Intel.dmg` | Same as above. Built against the official Qt 6.8 LTS with static FFmpeg. |
-| Linux x86_64 (2024+ distros) | `SPOTLIGHT-<ver>-x86_64.AppImage` | `chmod +x` and run — nothing to install. |
+| macOS 12+ (Intel) | `SPOTLIGHT-<ver>-macOS-Intel.dmg` | Same as above. |
+| Linux x86_64 (2024+ distros) | `SPOTLIGHT-<ver>-x86_64.AppImage` | `chmod +x` and run, nothing to install. |
 | Ubuntu 24.04 / Debian 13 | `spotlight-<ver>-linux-x86_64.deb` | `sudo apt install ./spotlight-*.deb` |
+
+## Keyboard shortcuts
+
+| Action | Shortcut | Action | Shortcut |
+|---|---|---|---|
+| Play / pause | `Space` | Split at playhead | `S` |
+| Previous / next frame | `←` / `→` | Ripple delete | `Shift+Del` |
+| Overwrite source clip at playhead | `.` | **Insert** source clip at playhead | `,` |
+| **Freeze frame** | `Shift+F` | **Record voiceover** | `Ctrl+R` |
+| **Add title** | `Ctrl+Alt+T` | Add / remove marker | `M` |
+| Next / previous marker | `Shift+M` / `Alt+M` | Snapping | `N` |
+| Copy / paste / duplicate | `Ctrl+C` / `V` / `D` | Zoom in / out / fit | `=` / `-` / `\` |
+| Import media | `Ctrl+I` | Export video/audio | `Ctrl+M` |
+| Export frame as image | `Ctrl+Shift+E` | Place design on timeline | `Ctrl+Shift+T` |
+| Capture program frame to design | `Ctrl+Shift+F` | Show guides | `G` |
+| Video / Audio / Design studio | `Ctrl+1` / `2` / `3` | Add text layer | `Ctrl+T` |
+
+(`Ctrl` is `⌘` on macOS. Every shortcut can be changed in **Edit → Keyboard Shortcuts**.)
 
 ## Building
 
@@ -109,8 +130,10 @@ Installers: `cd build && cpack` → `.deb` and `.tar.gz`; `packaging/linux/build
 ```bash
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
-Unit tests cover timeline editing, project files, undo, autosave/recovery and export command generation;
-an end-to-end test renders a real file with FFmpeg, and a GUI smoke test drives the whole window offscreen.
+Unit tests cover timeline editing (including speed, insert, ripple and freeze frame), project files, undo,
+autosave/recovery, captions and the export graph. Render tests export real files with FFmpeg and check the output
+pixels: transitions, picture-in-picture and chroma key. GUI tests check that the preview compositor matches, render
+design effects, and drive the whole window offscreen.
 
 CI (`.github/workflows/build.yml`) builds, tests, packages and smoke-launches the installers on Ubuntu 24.04 and
 macOS (Apple Silicon and Intel). Pushing a `v*` tag (or running the workflow with a release tag) publishes the `.dmg`,

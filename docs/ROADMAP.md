@@ -13,30 +13,23 @@ SPOTLIGHT! is built in stages instead of trying to recreate three huge applicati
 - [x] Customizable dock layouts and keyboard shortcuts
 - [x] macOS (.dmg) and Linux (.deb, .tar.gz, AppImage) packaging + CI
 
-## Stage 2 — Video Studio depth
-- [ ] Titles / lower thirds on the timeline (reuse the Design Studio renderer as a title generator)
-- [ ] Cross-dissolve and wipe transitions between adjacent clips (FFmpeg `xfade`)
-- [ ] Compositing of upper tracks (picture-in-picture, opacity, position/scale per clip)
-- [ ] Speed changes, freeze frames, reverse
-- [ ] Proxy media for 4K editing; background thumbnail strips along clips
-- [ ] Markers, in/out range export, J/K/L shuttle
-- [ ] LUT support and three-way colour wheels
+## Stage 2 — Pro features ✅ (v0.2)
+- [x] Layered compositing: picture-in-picture, opacity, position/scale/rotation/crop per clip
+- [x] Transitions (FFmpeg `xfade`, previewed live), titles and lower thirds, SRT captions
+- [x] Speed, reverse, freeze frame, insert edits, close gaps, markers
+- [x] Looks/filters, temperature/tint, vignette, blur, chroma key, Ken Burns, stabilization
+- [x] Remove silences, scene edit detection, beat markers, auto reframe
+- [x] Voiceover recording, gate, de-esser, voice changer, reverb, echo, limiter, auto-ducking, loudness targets
+- [x] Design: blend modes, drop shadow/glow/stroke, background removal, crop, fade masks, brush, more shapes, templates
 
-## Stage 3 — Audio Studio depth
-- [ ] Real-time effect preview (own audio engine on `QAudioSink` instead of per-track `QMediaPlayer`s)
-- [ ] Voice-over recording to a track; input monitoring
-- [ ] Volume automation lanes and keyframes; crossfades
-- [ ] Loudness normalisation to −14 LUFS (YouTube) / −16 LUFS (podcasts) on export, meters
-- [ ] More effects: de-esser, gate, reverb, limiter; VST3/AU/LV2 plugin hosting
-- [ ] MIDI and a simple step sequencer for music beds
-
-## Stage 4 — Design Studio depth
-- [ ] Layer masks and clipping masks, blend modes
-- [ ] Background removal for subjects (on-device segmentation model)
-- [ ] Gradients, strokes on shapes, text on path, effects (glow, blur)
-- [ ] Brush/eraser tools, crop
-- [ ] Templates (thumbnail styles), safe-zone overlays for YouTube/Shorts
-- [ ] Export the design straight into the timeline (end card / intro)
+## Stage 3 — Next up
+- [ ] Keyframes for transform, opacity and volume (automation lanes)
+- [ ] Automatic captions (on-device speech-to-text, e.g. whisper.cpp)
+- [ ] AI background removal for complex scenes (segmentation model)
+- [ ] Real-time audio effect preview (own audio engine on `QAudioSink`), level meters
+- [ ] Proxy media for 4K, LUT import and colour wheels, J/K/L shuttle
+- [ ] MIDI, step sequencer and VST3/AU/LV2 hosting
+- [ ] Text on a path, clipping masks, more templates
 
 ## Stage 5 — Performance & polish
 - [ ] GPU video pipeline (QRhi) and hardware decoding/encoding (VideoToolbox, VA-API, NVENC)
