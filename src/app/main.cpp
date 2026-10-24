@@ -1,3 +1,4 @@
+#include "selftest.h"
 #include "ui/mainwindow.h"
 #include "ui/theme.h"
 
@@ -58,7 +59,13 @@ int main(int argc, char *argv[])
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("Project file to open (.spotlight)"));
+    const QCommandLineOption selfTest(QStringLiteral("self-test"),
+                                      QStringLiteral("Check this installation end to end and exit (0 = OK)."),
+                                      QStringLiteral("output-dir"));
+    parser.addOption(selfTest);
     parser.process(app);
+    if (parser.isSet(selfTest))
+        return spotlight::runSelfTest(parser.value(selfTest));
 
     spotlight::MainWindow window;
     app.window = &window;

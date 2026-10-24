@@ -47,6 +47,8 @@ jobs:
           code=$?
           # 124 = still running when the timeout stopped it, i.e. it started fine.
           [ "$code" -eq 124 ] || { echo "AppImage exited early with $code"; exit 1; }
+          set -e
+          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen build-appimage/SPOTLIGHT-*.AppImage --self-test "$RUNNER_TEMP/self-test"
       - uses: actions/upload-artifact@v4
         with:
           name: spotlight-linux
@@ -65,7 +67,7 @@ jobs:
       - name: App icon
         run: packaging/macos/make-icns.sh
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
       - name: Build
         run: cmake --build build
       - name: Test
@@ -74,14 +76,8 @@ jobs:
           QT_QPA_PLATFORM: offscreen
       - name: Package (.dmg)
         run: packaging/macos/build-dmg.sh build-dmg
-      - name: Smoke test app bundle
-        run: |
-          APP=build-dmg/dmg/SPOTLIGHT.app
-          "$APP/Contents/MacOS/SPOTLIGHT" &
-          pid=$!
-          sleep 10
-          kill -0 "$pid" || { echo "SPOTLIGHT exited early"; exit 1; }
-          kill "$pid"
+      - name: Verify the .dmg (signature, self-test, launch)
+        run: packaging/macos/verify-dmg.sh build-dmg/*.dmg arm64
       - uses: actions/upload-artifact@v4
         with:
           name: spotlight-macos
@@ -132,14 +128,11 @@ jobs:
           lipo -archs "$APP/Contents/MacOS/SPOTLIGHT"
           lipo -archs "$APP/Contents/MacOS/SPOTLIGHT" | grep -qw x86_64
           vtool -show-build "$APP/Contents/MacOS/SPOTLIGHT" | grep -E 'minos|version' | head -3
-      - name: Smoke test app bundle
+      - name: Verify the .dmg (signature, self-test, launch)
         run: |
-          APP=build-dmg/dmg/SPOTLIGHT.app
-          "$APP/Contents/MacOS/SPOTLIGHT" &
-          pid=$!
-          sleep 10
-          kill -0 "$pid" || { echo "SPOTLIGHT exited early"; exit 1; }
-          kill "$pid"
+          # Hide the build machine's FFmpeg so the app must use its bundled copy.
+          rm -rf "$HOME/ffmpeg-static"
+          packaging/macos/verify-dmg.sh build-dmg/*.dmg x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: spotlight-macos-intel

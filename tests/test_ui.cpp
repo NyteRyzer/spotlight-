@@ -14,6 +14,9 @@
 #include <QLabel>
 #include <QAudioDevice>
 #include <QMediaDevices>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#include <QPermissions>
+#endif
 #include <QPushButton>
 #include <QTabWidget>
 #include "ui/programmonitor.h"
@@ -188,6 +191,11 @@ private slots:
             QTest::qWait(100);
         if (QMediaDevices::audioInputs().isEmpty())
             QSKIP("no audio input device", "");
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0) && QT_CONFIG(permissions)
+        // macOS CI machines can't grant microphone access to a test binary.
+        if (qApp->checkPermission(QMicrophonePermission{}) != Qt::PermissionStatus::Granted)
+            QSKIP("microphone permission not granted", "");
+#endif
         Project project;
         TimelinePlayer player(&project, new VideoView);
         RecordDialog dlg(&project, &player, QUuid());

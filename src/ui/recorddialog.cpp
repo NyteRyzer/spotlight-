@@ -9,6 +9,10 @@
 #include <QAudioDevice>
 #include <QAudioFormat>
 #include <QAudioSource>
+#include <QApplication>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#include <QPermissions>
+#endif
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -246,9 +250,48 @@ RecordDialog::RecordDialog(Project *project, TimelinePlayer *player, const QUuid
     if (inputs.isEmpty()) {
         m_record->setEnabled(false);
         m_info->setText(tr("No microphone or audio input was found. Connect one and reopen this window."));
-    } else {
-        startMeter();
+        return;
     }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0) && QT_CONFIG(permissions)
+    // macOS (and sandboxed Linux) only deliver microphone audio after the
+    // user allows it; Qt doesn't ask by itself, so request access here.
+    const QMicrophonePermission mic;
+    switch (qApp->checkPermission(mic)) {
+    case Qt::PermissionStatus::Granted:
+        startMeter();
+        break;
+    case Qt::PermissionStatus::Undetermined:
+        m_record->setEnabled(false);
+        m_info->setText(tr("Waiting for permission to use the microphone…"));
+        qApp->requestPermission(mic, this, [this](const QPermission &p) {
+            if (p.status() == Qt::PermissionStatus::Granted) {
+                m_record->setEnabled(true);
+                m_info->setText(tr("Microphone ready. Recording starts at the playhead."));
+                startMeter();
+            } else {
+                showPermissionDenied();
+            }
+        });
+        break;
+    case Qt::PermissionStatus::Denied:
+        showPermissionDenied();
+        break;
+    }
+#else
+    startMeter();
+#endif
+}
+
+void RecordDialog::showPermissionDenied()
+{
+    m_record->setEnabled(false);
+#ifdef Q_OS_MACOS
+    m_info->setText(tr("SPOTLIGHT! isn't allowed to use the microphone. Open System Settings → Privacy & "
+                       "Security → Microphone, turn on SPOTLIGHT!, then reopen this window."));
+#else
+    m_info->setText(tr("SPOTLIGHT! isn't allowed to use the microphone. Allow microphone access for SPOTLIGHT! "
+                       "in your system's privacy settings, then reopen this window."));
+#endif
 }
 
 RecordDialog::~RecordDialog()

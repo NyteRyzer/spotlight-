@@ -9,7 +9,16 @@ if(APPLE)
     endif()
 endif()
 
-qt_add_executable(spotlight MACOSX_BUNDLE main.cpp ${SPOTLIGHT_ICNS})
+# The minimum macOS shown to Finder: the deployment target when set (the
+# Intel build targets 12.0), else 11.0. The Apple Silicon build sets 14.0
+# because Homebrew's Qt requires it.
+if(CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(SPOTLIGHT_MACOS_MIN ${CMAKE_OSX_DEPLOYMENT_TARGET})
+else()
+    set(SPOTLIGHT_MACOS_MIN 11.0)
+endif()
+
+qt_add_executable(spotlight MACOSX_BUNDLE main.cpp selftest.h selftest.cpp ${SPOTLIGHT_ICNS})
 target_link_libraries(spotlight PRIVATE spotlight_ui)
 
 set_target_properties(spotlight PROPERTIES

@@ -59,6 +59,7 @@ protected:
 
 private:
     void startMeter();
+    void showPermissionDenied();
     void stopMeter();
     void readMeter();
     void toggleRecord();
