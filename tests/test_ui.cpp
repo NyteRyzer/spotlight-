@@ -8,6 +8,7 @@
 #include "media/timelineplayer.h"
 #include "media/videoview.h"
 #include "ui/inspector.h"
+#include "ui/autoclip.h"
 #include "ui/edittools.h"
 #include "ui/recorddialog.h"
 #include <QCheckBox>
@@ -26,6 +27,11 @@
 
 #include <QAction>
 #include <QDockWidget>
+#include <QComboBox>
+#include <QListWidget>
+#include <QSettings>
+#include <QTimer>
+#include <QDir>
 #include <QtTest>
 
 using namespace spotlight;
@@ -242,6 +248,99 @@ private slots:
         QVERIFY(project.data().media.last().hasAudio);
         QVERIFY(QFileInfo(project.data().media.last().path).size() > 10000);
         static_cast<QDialog &>(dlg).reject();
+    }
+
+
+    // Importing a long video scans it for highlights automatically; the
+    // results can be added to the timeline and exported as vertical clips.
+    void autoClipImportedVod()
+    {
+        const QString ffmpeg = Exporter::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg not installed", "");
+        QSettings().remove("autoclip");
+        QTemporaryDir tmp;
+        const QString vod = tmp.path() + "/stream-vod.mp4";
+        QProcess gen;
+        gen.start(ffmpeg, {"-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                           "testsrc2=s=320x180:r=10:d=210", "-f", "lavfi", "-i",
+                           "aevalsrc='0.03*sin(2*PI*220*t)*(1+0.5*sin(2*PI*3*t))*(1+30*between(t,60,63))"
+                           "+0.03*sin(2*PI*330*t)*(1+25*between(t,170,172))':s=44100:d=210",
+                           "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", vod});
+        QVERIFY(gen.waitForFinished(120000));
+        QCOMPARE(gen.exitCode(), 0);
+
+        MainWindow w;
+        w.show();
+        auto *video = w.findChild<VideoStudio *>();
+        auto *project = w.findChild<Project *>();
+        auto *clipper0 = w.findChild<AutoClipper *>();
+        connect(clipper0, &AutoClipper::status, this, [](const QString &m) { qInfo("autoclip: %s", qPrintable(m)); });
+        video->mediaBin()->importFiles({vod});
+        QTRY_COMPARE_WITH_TIMEOUT(project->data().media.size(), 1, 15000);
+        // The automatic scan finishes and stores highlights on the media item.
+        QTRY_VERIFY_WITH_TIMEOUT(project->data().media[0].highlightsAnalyzed, 60000);
+        const MediaItem m = project->data().media[0];
+        QVERIFY(m.highlights.size() >= 2);
+        bool first = false, second = false;
+        for (const auto &h : m.highlights) {
+            first |= h.start <= 60 * kUsPerSecond && h.end >= 63 * kUsPerSecond;
+            second |= h.start <= 170 * kUsPerSecond && h.end >= 172 * kUsPerSecond;
+        }
+        QVERIFY(first && second);
+
+        // Review dialog: shows the stored results without rescanning.
+        auto *clipper = w.findChild<AutoClipper *>();
+        AutoClipDialog dlg(project, clipper, m.id);
+        auto *list = dlg.findChild<QListWidget *>();
+        QCOMPARE(list->count(), m.highlights.size());
+        if (const QString shots = qEnvironmentVariable("SPOTLIGHT_SCREENSHOT_DIR"); !shots.isEmpty()) {
+            dlg.show();
+            QTest::qWait(2500); // thumbnails
+            dlg.grab().save(shots + "/autoclip-dialog.png");
+            w.grab().save(shots + "/autoclip-bin.png");
+        }
+        // Keep only the first two clips.
+        for (int i = 2; i < list->count(); ++i)
+            list->item(i)->setCheckState(Qt::Unchecked);
+
+        // Export as vertical clips (answer the options dialog).
+        QSettings().setValue("autoclip/exportDir", tmp.path() + "/clips");
+        QTimer::singleShot(300, [] {
+            for (QWidget *top : QApplication::topLevelWidgets()) {
+                auto *d = qobject_cast<QDialog *>(top);
+                if (d && d->isVisible() && d->windowTitle() == "Export Clips") {
+                    if (auto *fmt = d->findChild<QComboBox *>())
+                        fmt->setCurrentIndex(1); // vertical 9:16
+                    d->accept();
+                }
+            }
+        });
+        QPushButton *exportBtn = nullptr, *addBtn = nullptr;
+        for (auto *b : dlg.findChildren<QPushButton *>()) {
+            if (b->text().startsWith("Export"))
+                exportBtn = b;
+            if (b->text() == "Add to Timeline")
+                addBtn = b;
+        }
+        QVERIFY(exportBtn && addBtn);
+        exportBtn->click();
+        const QStringList clips = QDir(tmp.path() + "/clips").entryList({"*.mp4"});
+        QCOMPARE(clips.size(), 2);
+        QProcess probe;
+        probe.start(Exporter::findFfprobe(), {"-v", "error", "-select_streams", "v:0", "-show_entries",
+                                             "stream=width,height", "-of", "csv=p=0",
+                                             tmp.path() + "/clips/" + clips.first()});
+        probe.waitForFinished(30000);
+        QCOMPARE(QString::fromUtf8(probe.readAllStandardOutput()).trimmed(), QStringLiteral("1080,1920"));
+
+        // Add to timeline: a highlight reel with a dissolve between the clips.
+        addBtn->click();
+        const Track &v1 = project->data().tracks[0];
+        QCOMPARE(v1.clips.size(), 2);
+        QVERIFY(v1.clips[0].in < v1.clips[1].in); // story order
+        QCOMPARE(v1.clips[1].transition.type, QStringLiteral("fade"));
+        project->markSaved();
     }
 
     void mainWindowWorkflow()

@@ -33,6 +33,10 @@ mix its audio, then design its thumbnail, all in **one project**.
 - **Looks / filters:** Warm, Cool, Vivid, Cinematic, Vintage, Faded, Moody, Dreamy, B&W, Noir and Sepia. You can
   also fine-tune brightness, contrast, saturation, temperature, tint, vignette and blur.
 - **Chroma key** (green and blue screen), **Ken Burns** zoom and pan, and **stabilization**.
+- **Auto-Clip for videos and stream VODs:** import a long video and SPOTLIGHT! finds the moments worth clipping
+  (big reactions, hype, laughter, fast action) on its own. Review the clips with thumbnails and a preview, then
+  add them to the timeline as a highlight reel or export each one, ready for Shorts, TikTok and Reels as vertical
+  9:16 or square. Right-click any video in the Media Bin, or press `Ctrl+Shift+H`.
 - **Smart tools:** **Remove Silences** (automatic jump cuts), **Scene Edit Detection**, **beat markers**
   (BPM or tap tempo) and **Auto Reframe** to 9:16, 1:1 or 4:5 for Shorts, Reels and TikTok.
 - The preview **matches the export**. The Program Monitor composites tracks, looks, keys and transitions the same
@@ -89,6 +93,7 @@ Get the latest build from the **[Releases page](https://github.com/NyteRyzer/spo
 | Overwrite source clip at playhead | `.` | **Insert** source clip at playhead | `,` |
 | **Freeze frame** | `Shift+F` | **Record audio** | `Ctrl+R` |
 | **Add title** | `Ctrl+Alt+T` | Add / remove marker | `M` |
+| **Auto-Clip highlights** | `Ctrl+Shift+H` | Remove silences, scene detection | Timeline menu |
 | Next / previous marker | `Shift+M` / `Alt+M` | Snapping | `N` |
 | Copy / paste / duplicate | `Ctrl+C` / `V` / `D` | Zoom in / out / fit | `=` / `-` / `\` |
 | Import media | `Ctrl+I` | Export video/audio | `Ctrl+M` |

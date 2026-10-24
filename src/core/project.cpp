@@ -76,10 +76,12 @@ void Project::setData(const ProjectData &data)
 
 void Project::reset(const ProjectData &data, const QString &filePath)
 {
+    m_resetting = true;
     m_undo.clear();
     m_forceModified = false;
     setFilePath(filePath);
     setData(data);
+    m_resetting = false;
     m_undo.setClean();
     emit modifiedChanged(isModified());
 }

@@ -22,6 +22,7 @@ class AudioStudio;
 class DesignStudio;
 class TimelineWidget;
 class EditTools;
+class AutoClipper;
 
 // The unified SPOTLIGHT! window: one project, three connected studios.
 class MainWindow : public QMainWindow {
@@ -55,6 +56,7 @@ private:
     QString captureDirectory() const;
     void exportFrame();
     void relinkMedia();
+    void openAutoClip(const QUuid &mediaId);
     void placeDesignOnTimeline();
     void copySelection();
     void pasteClipboard();
@@ -76,6 +78,7 @@ private:
     AudioStudio *m_audio;
     DesignStudio *m_design;
     EditTools *m_tools;
+    AutoClipper *m_autoClip;
     QMenu *m_recentMenu = nullptr;
     QMenu *m_layoutMenu = nullptr;
     QLabel *m_autosaveLabel;

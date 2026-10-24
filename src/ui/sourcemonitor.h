@@ -22,6 +22,9 @@ public:
     explicit SourceMonitor(QWidget *parent = nullptr);
 
     void load(const MediaItem &item);
+    // Loads the item with in/out marks set to [in, out) and parks the
+    // playhead on the in-point (used to preview Auto-Clip highlights).
+    void loadRange(const MediaItem &item, TimeUs in, TimeUs out);
     QUuid mediaId() const { return m_item.id; }
     QImage currentFrame() const;
 
@@ -47,6 +50,7 @@ private:
     QToolButton *m_playBtn;
     TimeUs m_in = 0;
     TimeUs m_out = -1;
+    qint64 m_pendingSeekMs = -1;
 };
 
 } // namespace spotlight

@@ -9,6 +9,7 @@ add_library(spotlight_ui STATIC
     inspector.h inspector.cpp
     edittools.h edittools.cpp
     recorddialog.h recorddialog.cpp
+    autoclip.h autoclip.cpp
     videostudio.h videostudio.cpp
     audiostudio.h audiostudio.cpp
     designcanvas.h designcanvas.cpp

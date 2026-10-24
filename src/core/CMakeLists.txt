@@ -17,6 +17,7 @@ add_library(spotlight_core STATIC
     looks.h looks.cpp
     titles.h titles.cpp
     analysis.h analysis.cpp
+    highlights.h highlights.cpp
     designrender.h designrender.cpp
 )
 

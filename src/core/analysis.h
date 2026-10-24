@@ -38,6 +38,8 @@ public:
 
 signals:
     void finished(bool ok, const QString &log);
+    // Position reached in the file, when the args include "-progress pipe:1".
+    void progress(qint64 outTimeUs);
 
 private:
     QProcess *m_process = nullptr;

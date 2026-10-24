@@ -311,6 +311,18 @@ QJsonObject ProjectData::toJson(const QString &projectDir) const
         o["hasAudio"] = m.hasAudio;
         if (m.isTitle())
             o["title"] = m.titleDesign;
+        if (m.highlightsAnalyzed) {
+            QJsonArray hs;
+            for (const auto &h : m.highlights) {
+                QJsonObject ho;
+                ho["start"] = double(h.start);
+                ho["end"] = double(h.end);
+                ho["score"] = h.score;
+                ho["reason"] = h.reason;
+                hs.append(ho);
+            }
+            o["highlights"] = hs;
+        }
         mediaArr.append(o);
     }
     root["media"] = mediaArr;
@@ -396,6 +408,16 @@ bool ProjectData::fromJson(const QJsonObject &root, ProjectData *out, QString *e
         m.hasVideo = o["hasVideo"].toBool();
         m.hasAudio = o["hasAudio"].toBool();
         m.titleDesign = o["title"].toObject();
+        m.highlightsAnalyzed = o.contains("highlights");
+        for (const auto &hv : o["highlights"].toArray()) {
+            const QJsonObject ho = hv.toObject();
+            Highlight h;
+            h.start = TimeUs(ho["start"].toDouble());
+            h.end = TimeUs(ho["end"].toDouble());
+            h.score = ho["score"].toDouble();
+            h.reason = ho["reason"].toString();
+            m.highlights.append(h);
+        }
         d.media.append(m);
     }
 

@@ -9,7 +9,9 @@
 #include "ui/actions.h"
 #include "ui/audiostudio.h"
 #include "ui/designstudio.h"
+#include "ui/autoclip.h"
 #include "ui/edittools.h"
+#include "ui/sourcemonitor.h"
 #include "ui/inspector.h"
 #include "ui/exportdialog.h"
 #include "ui/mediabin.h"
@@ -76,6 +78,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_tools = new EditTools(m_project, m_video->programMonitor()->player(), m_video->mediaBin(), this);
     m_tools->setTimelineProvider([this] { return activeTimeline(); });
     connect(m_tools, &EditTools::status, this, [this](const QString &m) { statusBar()->showMessage(m, 8000); });
+    m_autoClip = new AutoClipper(m_project, m_video->mediaBin(), this);
+    connect(m_autoClip, &AutoClipper::status, this, [this](const QString &m) { statusBar()->showMessage(m, 12000); });
+    connect(m_video->mediaBin(), &MediaBin::autoClipRequested, this, &MainWindow::openAutoClip);
     connect(m_video->inspector(), &ClipInspector::freezeFrameRequested, m_tools, &EditTools::freezeFrame);
     connect(m_video->inspector(), &ClipInspector::reverseRequested, m_tools, &EditTools::reverseClip);
     connect(m_video->inspector(), &ClipInspector::editTitleRequested, m_tools, &EditTools::editTitle);
@@ -329,6 +334,20 @@ void MainWindow::buildMenus()
     add(QStringLiteral("timeline.silences"), tr("Remove Silences (Jump Cuts)..."), QKeySequence(),
         [this] { m_tools->removeSilences(); });
     add(QStringLiteral("timeline.scenes"), tr("Scene Edit Detection"), QKeySequence(), [this] { m_tools->detectScenes(); });
+    add(QStringLiteral("timeline.autoclip"), tr("Auto-Clip Highlights..."), QKeySequence(tr("Ctrl+Shift+H")), [this] {
+        // The selected bin item, else the media of the selected / playhead clip.
+        QUuid media = m_video->mediaBin()->currentMedia();
+        if (media.isNull()) {
+            const auto sel = activeTimeline()->selection();
+            if (const Clip *c = sel.isEmpty() ? nullptr : m_project->data().clipById(sel.first()))
+                media = c->mediaId;
+        }
+        if (media.isNull()) {
+            statusBar()->showMessage(tr("Select a video in the Media Bin to find its highlights."), 6000);
+            return;
+        }
+        openAutoClip(media);
+    });
     add(QStringLiteral("timeline.beats"), tr("Add Beat Markers..."), QKeySequence(), [this] { m_tools->addBeatMarkers(); });
     add(QStringLiteral("timeline.reframe"), tr("Auto Reframe (Vertical / Square)..."), QKeySequence(),
         [this] { m_tools->autoReframe(); });
@@ -485,6 +504,23 @@ void MainWindow::buildMenus()
                               "<p>Built with Qt %2 and FFmpeg.</p>")
                                .arg(QStringLiteral(SPOTLIGHT_VERSION), QString::fromLatin1(qVersion())));
     });
+}
+
+void MainWindow::openAutoClip(const QUuid &mediaId)
+{
+    // Modeless, so a previewed clip can be played in the Source monitor
+    // while the list stays open.
+    auto *dlg = new AutoClipDialog(m_project, m_autoClip, mediaId, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &AutoClipDialog::status, this, [this](const QString &m) { statusBar()->showMessage(m, 8000); });
+    connect(dlg, &AutoClipDialog::previewRequested, this, [this](const QUuid &id, TimeUs in, TimeUs out) {
+        if (const MediaItem *m = m_project->data().mediaById(id)) {
+            setWorkspace(Video);
+            m_video->sourceMonitor()->loadRange(*m, in, out);
+            statusBar()->showMessage(tr("Previewing in the Source monitor (in/out set) — press Space to play."), 8000);
+        }
+    });
+    dlg->show();
 }
 
 void MainWindow::updateTitle()

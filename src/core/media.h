@@ -6,10 +6,21 @@
 #include <QSize>
 #include <QString>
 #include <QUuid>
+#include <QVector>
 
 namespace spotlight {
 
 enum class MediaKind { Video, Audio, Image };
+
+// A moment found by Auto-Clip in a long video (source times).
+struct Highlight {
+    TimeUs start = 0;
+    TimeUs end = 0;
+    double score = 0;  // 0..100
+    QString reason;    // e.g. "Big reaction", "Fast action"
+
+    TimeUs duration() const { return end - start; }
+};
 
 // A file imported into the project's media bin.
 struct MediaItem {
@@ -25,6 +36,9 @@ struct MediaItem {
     // Titles are transparent PNGs rendered from a design document kept here
     // so they can be re-edited (and re-rendered if the PNG goes missing).
     QJsonObject titleDesign;
+    // Auto-Clip results (empty until analysed).
+    QVector<Highlight> highlights;
+    bool highlightsAnalyzed = false;
 
     bool isStill() const { return kind == MediaKind::Image; }
     bool isTitle() const { return !titleDesign.isEmpty(); }

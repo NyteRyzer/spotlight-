@@ -39,6 +39,9 @@ public:
     QString displayName() const;
 
     bool isModified() const { return !m_undo.isClean() || m_forceModified; }
+    // True while reset() replaces the whole project (opening a file, New,
+    // recovery), as opposed to an edit.
+    bool isResetting() const { return m_resetting; }
     // Marks the current state as saved.
     void markSaved();
     // Marks a recovered project as unsaved even though its undo stack is empty.
@@ -66,6 +69,7 @@ private:
     QString m_filePath;
     quint64 m_revision = 0;
     bool m_forceModified = false;
+    bool m_resetting = false;
 };
 
 } // namespace spotlight

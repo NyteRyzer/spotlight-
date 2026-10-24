@@ -82,6 +82,12 @@ SourceMonitor::SourceMonitor(QWidget *parent)
         // Show the first frame instead of a black screen after loading.
         if (s == QMediaPlayer::LoadedMedia && m_player->playbackState() == QMediaPlayer::StoppedState)
             m_player->pause();
+        if (s == QMediaPlayer::LoadedMedia && m_pendingSeekMs >= 0) {
+            const qint64 ms = m_pendingSeekMs;
+            m_pendingSeekMs = -1;
+            // Queued: the backend ignores seeks made inside this notification.
+            QMetaObject::invokeMethod(this, [this, ms] { m_player->setPosition(ms); }, Qt::QueuedConnection);
+        }
     });
     connect(m_slider, &QSlider::sliderMoved, m_player, &QMediaPlayer::setPosition);
     updateLabels();
@@ -92,6 +98,7 @@ void SourceMonitor::load(const MediaItem &item)
     m_item = item;
     m_in = 0;
     m_out = -1;
+    m_pendingSeekMs = -1;
     m_player->stop();
     if (item.isStill()) {
         m_player->setSource(QUrl());
@@ -104,6 +111,15 @@ void SourceMonitor::load(const MediaItem &item)
         m_player->setSource(QUrl::fromLocalFile(item.path));
     }
     m_view->setPlaceholderText(item.hasVideo || item.isStill() ? QString() : tr("♫  %1").arg(item.name));
+    updateLabels();
+}
+
+void SourceMonitor::loadRange(const MediaItem &item, TimeUs in, TimeUs out)
+{
+    load(item);
+    m_in = in;
+    m_out = out;
+    m_pendingSeekMs = usToMs(in);
     updateLabels();
 }
 

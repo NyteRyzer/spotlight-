@@ -110,7 +110,16 @@ bool Job::start(const QStringList &args, QString *error)
     m_log.clear();
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
-    connect(m_process, &QProcess::readyRead, this, [this] { m_log += QString::fromUtf8(m_process->readAll()); });
+    connect(m_process, &QProcess::readyRead, this, [this] {
+        const QString chunk = QString::fromUtf8(m_process->readAll());
+        m_log += chunk;
+        const qsizetype i = chunk.lastIndexOf(QStringLiteral("out_time_us="));
+        if (i >= 0) {
+            const qint64 us = chunk.mid(i + 12, chunk.indexOf(QLatin1Char('\n'), i) - i - 12).toLongLong();
+            if (us > 0)
+                emit progress(us);
+        }
+    });
     connect(m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus st) {
         m_log += QString::fromUtf8(m_process->readAll());
         m_process->deleteLater();

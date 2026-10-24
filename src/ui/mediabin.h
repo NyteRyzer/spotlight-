@@ -31,11 +31,14 @@ public slots:
     void importFiles(const QStringList &paths);
     void importDialog();
     void removeSelected();
+    // Marks a media item as being scanned by Auto-Clip (shown in the bin).
+    void setAnalyzing(const QUuid &mediaId, bool on);
 
 signals:
     void openInSource(const QUuid &mediaId);
     void thumbnailsChanged();
     void status(const QString &message);
+    void autoClipRequested(const QUuid &mediaId);
 
 protected:
     void dragEnterEvent(QDragEnterEvent *e) override;
@@ -53,6 +56,7 @@ private:
     QHash<QString, QImage> m_thumbs;
     QSet<QString> m_thumbRequested;
     QString m_shownSignature; // what the list currently displays
+    QSet<QUuid> m_analyzing;
 };
 
 } // namespace spotlight

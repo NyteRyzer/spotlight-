@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPainter>
@@ -126,6 +127,27 @@ MediaBin::MediaBin(Project *project, QWidget *parent)
 
     setAcceptDrops(true);
 
+    m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_list, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        QListWidgetItem *it = m_list->itemAt(pos);
+        if (!it)
+            return;
+        m_list->setCurrentItem(it);
+        const QUuid id = QUuid::fromString(it->data(Qt::UserRole).toString());
+        const MediaItem *m = m_project->data().mediaById(id);
+        QMenu menu(this);
+        menu.addAction(tr("Open in Source Monitor"), this, [this, id] { emit openInSource(id); });
+        if (m && !m->isStill() && m->duration > 10 * kUsPerSecond) {
+            QAction *a = menu.addAction(m->highlightsAnalyzed && !m->highlights.isEmpty()
+                                            ? tr("Auto-Clip: Review %n Highlight(s)…", nullptr, m->highlights.size())
+                                            : tr("Auto-Clip: Find Highlights…"),
+                                        this, [this, id] { emit autoClipRequested(id); });
+            a->setEnabled(!m_analyzing.contains(id));
+        }
+        menu.addSeparator();
+        menu.addAction(tr("Remove from Project"), this, &MediaBin::removeSelected);
+        menu.exec(m_list->viewport()->mapToGlobal(pos));
+    });
     connect(m_list, &QListWidget::itemDoubleClicked, this,
             [this](QListWidgetItem *i) { emit openInSource(QUuid::fromString(i->data(Qt::UserRole).toString())); });
     connect(m_probe, &MediaProbe::probed, this, &MediaBin::onProbed);
@@ -158,6 +180,15 @@ void MediaBin::dropEvent(QDropEvent *e)
     }
     importFiles(paths);
     e->acceptProposedAction();
+}
+
+void MediaBin::setAnalyzing(const QUuid &mediaId, bool on)
+{
+    if (on)
+        m_analyzing.insert(mediaId);
+    else
+        m_analyzing.remove(mediaId);
+    rebuild();
 }
 
 QUuid MediaBin::currentMedia() const
@@ -240,7 +271,9 @@ void MediaBin::rebuild()
     for (const MediaItem &m : m_project->data().media) {
         signature += m.id.toString() + m.path + m.name + QString::number(m.duration)
             + (QFileInfo::exists(m.path) ? QLatin1Char('1') : QLatin1Char('0'))
-            + (m_thumbs.contains(m.path) ? QLatin1Char('t') : QLatin1Char('-'));
+            + (m_thumbs.contains(m.path) ? QLatin1Char('t') : QLatin1Char('-'))
+            + QString::number(m.highlightsAnalyzed ? m.highlights.size() : -1)
+            + (m_analyzing.contains(m.id) ? QLatin1Char('a') : QLatin1Char('-'));
     }
     if (signature == m_shownSignature && m_list->count() == m_project->data().media.size())
         return;
@@ -253,7 +286,12 @@ void MediaBin::rebuild()
             m_thumbRequested.insert(m.path);
             m_thumbProbe->probe(m.path);
         }
-        auto *item = new QListWidgetItem(makeIcon(m_thumbs.value(m.path), m), m.name, m_list);
+        QString label = m.name;
+        if (m_analyzing.contains(m.id))
+            label = tr("✂ finding clips…  %1").arg(m.name);
+        else if (m.highlightsAnalyzed && !m.highlights.isEmpty())
+            label = tr("✂ %1  %2").arg(m.highlights.size()).arg(m.name);
+        auto *item = new QListWidgetItem(makeIcon(m_thumbs.value(m.path), m), label, m_list);
         item->setData(Qt::UserRole, m.id.toString(QUuid::WithoutBraces));
         QString tip = QStringLiteral("%1\n%2").arg(m.name, m.path);
         if (!m.resolution.isEmpty())
@@ -262,6 +300,10 @@ void MediaBin::rebuild()
             tip += QStringLiteral(" @ %1 fps").arg(m.frameRate, 0, 'f', 2);
         if (!m.isStill())
             tip += QStringLiteral("\n%1").arg(formatDuration(m.duration));
+        if (m.highlightsAnalyzed)
+            tip += m.highlights.isEmpty() ? tr("\nAuto-Clip: no standout moments found")
+                                          : tr("\nAuto-Clip: %n highlight(s) — right-click → Auto-Clip to review",
+                                               nullptr, m.highlights.size());
         item->setToolTip(tip);
         if (m.id == current)
             m_list->setCurrentItem(item);

@@ -1,4 +1,5 @@
 #include "core/exporter.h"
+#include "core/highlights.h"
 #include "core/looks.h"
 #include "core/titles.h"
 #include "core/timelineops.h"
@@ -155,6 +156,81 @@ private slots:
         QVERIFY(done.wait(120000));
         QVERIFY2(done.first().at(0).toBool(), qPrintable(done.first().at(1).toString()));
         QVERIFY(QFileInfo(out).size() > 1000);
+    }
+
+
+    // ---- Auto-Clip ----------------------------------------------------------
+    void highlightsFromSignals()
+    {
+        highlights::Signals s;
+        s.duration = 600;
+        s.loudnessDb = QVector<double>(600, -32.0);
+        for (int i = 0; i < 600; ++i)
+            s.loudnessDb[i] += (i * 7919 % 13) / 6.0; // speech-like wobble
+        for (int i = 120; i < 124; ++i)
+            s.loudnessDb[i] = -8; // big reaction
+        for (int i = 400; i < 403; ++i)
+            s.loudnessDb[i] = -12; // smaller one
+        for (int i = 280; i < 290; ++i)
+            s.sceneCuts << i + 0.5 << i + 0.9; // montage, normal volume
+        highlights::Options o;
+        o.clipSeconds = 30;
+        o.maxClips = 3;
+        const auto hs = highlights::findHighlights(s, o);
+        QCOMPARE(hs.size(), 3);
+        // Strongest first, each clip contains its moment with the build-up before it.
+        QVERIFY(hs[0].start < 120 * S && hs[0].end > 123 * S);
+        QCOMPARE(hs[0].reason, QStringLiteral("Big reaction"));
+        QVERIFY(hs[0].score >= hs[1].score && hs[1].score >= hs[2].score);
+        bool foundSecond = false, foundMontage = false;
+        for (const auto &h : hs) {
+            QVERIFY(std::abs(usToSeconds(h.duration()) - 30) <= 5);
+            foundSecond |= h.start < 400 * S && h.end > 402 * S;
+            foundMontage |= h.start < 285 * S && h.end > 285 * S && h.reason == "Fast action";
+        }
+        QVERIFY(foundSecond);
+        QVERIFY(foundMontage);
+        // Clips never overlap.
+        for (int i = 0; i < hs.size(); ++i)
+            for (int j = i + 1; j < hs.size(); ++j)
+                QVERIFY(hs[i].end <= hs[j].start || hs[j].end <= hs[i].start);
+        // A flat video has no highlights.
+        highlights::Signals flat;
+        flat.duration = 300;
+        flat.loudnessDb = QVector<double>(300, -30.0);
+        QVERIFY(highlights::findHighlights(flat, o).isEmpty());
+    }
+
+    void highlightsFromRealVod()
+    {
+        const QString ffmpeg = Exporter::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg not installed", "");
+        QTemporaryDir tmp;
+        const QString vod = tmp.path() + "/vod.mp4";
+        // 3 minutes of quiet chatter with two loud moments (at 50 s and 140 s).
+        QProcess gen;
+        gen.start(ffmpeg, {"-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                           "testsrc2=s=320x180:r=15:d=180", "-f", "lavfi", "-i",
+                           "aevalsrc='0.03*sin(2*PI*220*t)*(1+0.5*sin(2*PI*3*t))*(1+30*between(t,50,53))"
+                           "+0.03*sin(2*PI*330*t)*(1+20*between(t,140,142))':s=44100:d=180",
+                           "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", vod});
+        QVERIFY(gen.waitForFinished(120000));
+        QCOMPARE(gen.exitCode(), 0);
+        QProcess p;
+        p.setProcessChannelMode(QProcess::MergedChannels);
+        p.start(ffmpeg, highlights::analysisArgs(vod, true, true));
+        QVERIFY(p.waitForFinished(120000));
+        QCOMPARE(p.exitCode(), 0);
+        const auto sig = highlights::parseAnalysis(QString::fromUtf8(p.readAll()), 180);
+        QVERIFY(sig.loudnessDb.size() >= 179);
+        highlights::Options o;
+        o.clipSeconds = 20;
+        o.maxClips = 2;
+        const auto hs = highlights::findHighlights(sig, o);
+        QCOMPARE(hs.size(), 2);
+        QVERIFY(hs[0].start <= 50 * S && hs[0].end >= 53 * S);
+        QVERIFY(hs[1].start <= 140 * S && hs[1].end >= 142 * S);
     }
 
     // ---- Pro features ---------------------------------------------------
