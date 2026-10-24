@@ -44,7 +44,7 @@ echo "== Static dependency scan"
 # Every Mach-O file may only link the OS or something inside the bundle.
 bad=0
 while IFS= read -r f; do
-  file -b "$f" | grep -q Mach-O || continue
+  [[ "$(file -b "$f")" == *Mach-O* ]] || continue
   own="$(otool -D "$f" 2>/dev/null | tail -n +2 | head -1)" # a library's own install name isn't a load
   deps="$(otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -vxF "${own:-<none>}" \
           | grep -vE '^(@rpath|@loader_path|@executable_path|/usr/lib/|/System/)' || true)"

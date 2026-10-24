@@ -58,8 +58,8 @@ fi
 # Mac but make the app load a second, mismatched Qt on Macs that have
 # Homebrew's Qt installed. Bundle-relative (@...) paths are kept.
 while IFS= read -r -d '' f; do
-  file -b "$f" | grep -q Mach-O || continue
-  otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -v '^@' | sort -u | while read -r rp; do
+  [[ "$(file -b "$f")" == *Mach-O* ]] || continue
+  { otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -v '^@' || true; } | sort -u | while read -r rp; do
     chmod u+w "$f"
     while install_name_tool -delete_rpath "$rp" "$f" 2>/dev/null; do :; done
     echo "removed rpath $rp from ${f#$APP/}"
