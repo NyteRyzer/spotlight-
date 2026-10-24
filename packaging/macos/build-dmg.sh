@@ -53,6 +53,22 @@ fi
   -executable="$APP/Contents/MacOS/ffmpeg" \
   -executable="$APP/Contents/MacOS/ffprobe"
 
+# Drop library search paths (LC_RPATH) that point outside the bundle, e.g.
+# the build tree's /opt/homebrew/opt/qt/lib. They're harmless on a clean
+# Mac but make the app load a second, mismatched Qt on Macs that have
+# Homebrew's Qt installed. Bundle-relative (@...) paths are kept.
+while IFS= read -r -d '' f; do
+  file -b "$f" | grep -q Mach-O || continue
+  otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -v '^@' | sort -u | while read -r rp; do
+    chmod u+w "$f"
+    while install_name_tool -delete_rpath "$rp" "$f" 2>/dev/null; do :; done
+    echo "removed rpath $rp from ${f#$APP/}"
+  done
+done < <(find "$APP/Contents" -type f -print0)
+# The app must still find its own frameworks.
+otool -l "$APP/Contents/MacOS/SPOTLIGHT" | grep -q '@executable_path/../Frameworks' \
+  || install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/SPOTLIGHT"
+
 # Nothing may still point into Homebrew or the Qt install, or the app breaks
 # on other Macs.
 leaks=0

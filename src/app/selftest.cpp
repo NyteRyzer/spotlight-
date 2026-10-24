@@ -75,14 +75,16 @@ bool waitUntil(const std::function<bool()> &cond, int timeoutMs)
 int run(const QString &program, const QStringList &args, QString *out = nullptr, int timeoutMs = 120000)
 {
     QProcess p;
-    p.setProcessChannelMode(QProcess::MergedChannels);
+    // Only stdout: diagnostics on stderr (e.g. DYLD_PRINT_LIBRARIES when the
+    // CI audits library loads) must not end up in parsed values.
+    p.setProcessChannelMode(QProcess::SeparateChannels);
     p.start(program, args);
     if (!p.waitForFinished(timeoutMs)) {
         p.kill();
         return -1;
     }
     if (out)
-        *out = QString::fromUtf8(p.readAll());
+        *out = QString::fromUtf8(p.readAllStandardOutput());
     return p.exitStatus() == QProcess::NormalExit ? p.exitCode() : -1;
 }
 
