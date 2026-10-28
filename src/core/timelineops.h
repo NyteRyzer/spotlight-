@@ -153,6 +153,63 @@ Transition effectiveTransition(const Track &t, const Clip &c);
 // where a transition takes over (as in the export).
 double videoAlpha(const Track &t, const Clip &c, TimeUs at);
 
+// ---- More editing ------------------------------------------------------
+// The project with disabled clips removed (what preview and export show).
+ProjectData withoutDisabledClips(const ProjectData &d);
+
+// Ripple trim (Premiere Q / W): trims the clip's head (or tail) to `at` and
+// closes the gap, pulling later clips on the same tracks left.
+bool rippleTrim(ProjectData &d, const QUuid &clipId, TimeUs at, bool head);
+
+// Nearest clip edge on any track strictly after / before t (-1 if none).
+TimeUs nextEditPoint(const ProjectData &d, TimeUs t);
+TimeUs previousEditPoint(const ProjectData &d, TimeUs t);
+
+// Lift: removes [from, to) on unlocked tracks and leaves a gap.
+// (Extract is rippleDeleteRange.)
+void liftRange(ProjectData &d, TimeUs from, TimeUs to);
+
+// Moves the clips (and partners) by delta, e.g. one frame (overwrite edit).
+int nudgeClips(ProjectData &d, const QVector<QUuid> &clipIds, TimeUs delta);
+
+// A copy of the project trimmed to [from, to), starting at 0 (for exporting
+// the In/Out range). Locks are ignored.
+ProjectData rangeProject(const ProjectData &d, TimeUs from, TimeUs to);
+
+// Puts other media into the clip (and partners) keeping position, length
+// limits and effects. Partners whose track can't hold the new media are
+// removed. Returns false if nothing changed.
+bool replaceClipMedia(ProjectData &d, const QUuid &clipId, const QUuid &mediaId);
+
+// Paste Attributes: copies the chosen groups of settings from `src`.
+struct AttributeSet {
+    bool color = true;      // look, colour
+    bool transform = true;  // position/scale/crop/opacity, motion
+    bool effects = true;    // effects, chroma key, stabilise
+    bool audio = true;      // gain, fades
+    bool speed = false;
+};
+int pasteAttributes(ProjectData &d, const QVector<QUuid> &clipIds, const Clip &src, const AttributeSet &what);
+
+// Gives the clips fade in/out of `length` (at most half the clip each).
+int applyQuickFades(ProjectData &d, const QVector<QUuid> &clipIds, TimeUs length);
+
+// YouTube chapter list ("0:00 Intro") from the markers. YouTube needs the
+// first chapter at 0:00, three or more chapters and 10 s+ each: `warnings`
+// explains anything that won't qualify.
+QString youtubeChapters(const ProjectData &d, QStringList *warnings = nullptr);
+
+// Collect Files: where each used media file should be copied inside
+// `folder` (unique file names). Titles and missing files are skipped.
+struct CopyPlan {
+    QUuid mediaId;
+    QString from;
+    QString to;
+};
+QVector<CopyPlan> collectPlan(const ProjectData &d, const QString &folder);
+// Media items no clip uses.
+QVector<QUuid> unusedMedia(const ProjectData &d);
+
 // Splits a clip (and partners) at every time in `cuts` that falls inside it.
 int splitAtTimes(ProjectData &d, const QUuid &clipId, const QVector<TimeUs> &cuts);
 

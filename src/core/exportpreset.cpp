@@ -95,6 +95,14 @@ QVector<ExportPreset> builtInExportPresets()
         p.builtIn = true;
         r.append(p);
     };
+    {
+        // Silent, looping, palette-optimised: for reactions, memes and previews.
+        ExportPreset *p = video(QStringLiteral("Animated GIF (480p, 15 fps)"), 854, 480, 15, 0);
+        p->container = QStringLiteral("gif");
+        p->videoCodec = QStringLiteral("gif");
+        p->speedPreset.clear();
+        p->loudnessLufs = 0;
+    }
     audio(QStringLiteral("Podcast / Music MP3 (320 kbps)"), QStringLiteral("mp3"), QStringLiteral("libmp3lame"), 320);
     audio(QStringLiteral("Audio AAC (M4A, 256 kbps)"), QStringLiteral("m4a"), QStringLiteral("aac"), 256);
     audio(QStringLiteral("Audio WAV (24-bit master)"), QStringLiteral("wav"), QStringLiteral("pcm_s24le"), 0);

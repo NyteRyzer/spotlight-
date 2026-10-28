@@ -26,6 +26,14 @@ double vignetteAngle(double amount);
 // Gaussian blur sigma in output pixels for a frame of the given height.
 double blurSigma(double amount, int frameHeight);
 
+// Effect parameters shared by the exporter and the preview so they match.
+double sharpenAmount(double amount);           // unsharp-mask strength
+int pixelBlock(double amount, int height);     // mosaic block size in pixels
+double grainStrength(double amount);           // FFmpeg noise strength (0..100)
+int cinemaBarHeight(const QSize &picture);     // bar height for a 2.39:1 frame
+int borderPixels(double amount, int frameHeight);
+double blurFillSigma(int frameHeight);
+
 // A named one-click look ("filter" in CapCut/Filmora terms).
 struct LookPreset {
     QString name;
@@ -47,11 +55,16 @@ QStringList motionNames(); // index = Motion enum value
 // at progress p (0..1). Shared by preview and export so they match.
 struct MotionState {
     double zoom = 1.0;
-    double dx = 0.0;
+    double dx = 0.0; // fractions of the picture size
     double dy = 0.0;
+    double fx = 0.0; // fractions of the frame size (entrance slides)
+    double fy = 0.0;
 };
-MotionState motionAt(Motion m, double p);
-constexpr double kMotionAmount = 0.18; // zoom/pan range of a Ken Burns move
+// p = progress through the clip (0..1), elapsed = seconds since it started.
+MotionState motionAt(Motion m, double p, double elapsed = 1e9);
+constexpr double kMotionAmount = 0.18;   // zoom/pan range of a Ken Burns move
+constexpr double kEntranceSeconds = 0.6; // length of slide / pop entrances
+bool isEntrance(Motion m);
 
 } // namespace spotlight
 

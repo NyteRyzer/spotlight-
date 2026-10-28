@@ -12,7 +12,7 @@
 namespace spotlight {
 
 enum class LayerType { Image, Text, Shape, Drawing };
-enum class ShapeKind { Rectangle, Ellipse, Triangle, Star, Arrow, Line };
+enum class ShapeKind { Rectangle, Ellipse, Triangle, Star, Arrow, Line, SpeechBubble, Burst };
 
 // Photoshop-style layer blend modes (mapped to QPainter composition modes).
 enum class BlendMode {
@@ -71,6 +71,9 @@ struct DesignLayer {
     double cropLeft = 0.0, cropTop = 0.0, cropRight = 0.0, cropBottom = 0.0; // fractions
     int fadeDirection = 0;   // see fadeMask(): 0 bottom, 1 top, 2 right, 3 left
     double fadeAmount = 0.0; // 0 = no fade mask
+    bool tint = false;       // colour overlay (duotone-style)
+    QColor tintColor = QColor(255, 120, 0);
+    double tintAmount = 0.5; // 0 .. 1
 
     // Text
     QString text;
@@ -85,6 +88,9 @@ struct DesignLayer {
     double letterSpacing = 0.0; // percent of the font size
     int align = 0;              // 0 left, 1 centre, 2 right (multi-line text)
     double lineHeight = 1.0;    // multiple of the font's line spacing
+    bool textGradient = false;  // gradient fill from textColor to textColor2
+    QColor textColor2 = QColor(255, 120, 0);
+    double textGradientAngle = 90.0; // degrees, 90 = top→bottom
     bool textBox = false;       // filled box behind the text (caption style)
     QColor textBoxColor = QColor(0, 0, 0, 170);
     double textBoxPadding = 0.3; // fraction of the font size

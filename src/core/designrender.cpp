@@ -64,7 +64,12 @@ QImage DesignRenderer::adjustedImage(const DesignLayer &l)
                             .arg(int(l.grayscale) | int(l.invert) << 1 | int(l.removeBg) << 2)
                             .arg(QStringLiteral("%1,%2,%3,%4,%5").arg(l.removeBgTolerance).arg(l.cropLeft).arg(l.cropTop)
                                      .arg(l.cropRight).arg(l.cropBottom))
-                            .arg(QStringLiteral("%1,%2").arg(l.fadeDirection).arg(l.fadeAmount));
+                            .arg(QStringLiteral("%1,%2,%3,%4,%5")
+                                     .arg(l.fadeDirection)
+                                     .arg(l.fadeAmount)
+                                     .arg(int(l.tint))
+                                     .arg(l.tintColor.rgba())
+                                     .arg(l.tintAmount));
     auto it = m_adjusted.constFind(key);
     if (it != m_adjusted.constEnd())
         return *it;
@@ -85,6 +90,23 @@ QImage DesignRenderer::adjustedImage(const DesignLayer &l)
             img = invertImage(img);
         if (l.blur > 0)
             img = blurImage(img, l.blur);
+        if (l.tint && l.tintAmount > 0) {
+            // Colour overlay that keeps the image's light and shade.
+            QImage mono = adjustImage(img, 0.0, 1.0, 0.0).convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            QPainter tp(&mono);
+            tp.setCompositionMode(QPainter::CompositionMode_Multiply);
+            tp.fillRect(mono.rect(), l.tintColor);
+            tp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            tp.drawImage(0, 0, img.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+            tp.end();
+            QImage blended = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            QPainter bp(&blended);
+            bp.setOpacity(std::clamp(l.tintAmount, 0.0, 1.0));
+            bp.setCompositionMode(QPainter::CompositionMode_SourceAtop);
+            bp.drawImage(0, 0, mono);
+            bp.end();
+            img = blended;
+        }
         if (l.fadeAmount > 0)
             img = fadeMask(img, l.fadeDirection, l.fadeAmount);
         img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
@@ -190,6 +212,36 @@ QPainterPath DesignRenderer::shapePath(const DesignLayer &l)
     case ShapeKind::Line:
         path.addRoundedRect(r, r.height() / 2, r.height() / 2);
         break;
+    case ShapeKind::SpeechBubble: {
+        // Rounded body over the top 78 %, tail at the lower left.
+        const QRectF body(r.left(), r.top(), r.width(), r.height() * 0.78);
+        const double rad = std::min(body.width(), body.height()) * 0.22;
+        path.addRoundedRect(body, rad, rad);
+        QPainterPath tail;
+        tail.moveTo(r.left() + r.width() * 0.18, body.bottom() - 2);
+        tail.lineTo(r.left() + r.width() * 0.10, r.bottom());
+        tail.lineTo(r.left() + r.width() * 0.38, body.bottom() - 2);
+        tail.closeSubpath();
+        path = path.united(tail);
+        break;
+    }
+    case ShapeKind::Burst: {
+        // A 14-point "sale sticker" starburst.
+        const QPointF c = r.center();
+        const double rx = r.width() / 2, ry = r.height() / 2;
+        const int points = 14;
+        for (int i = 0; i < points * 2; ++i) {
+            const double a = -M_PI / 2 + i * M_PI / points;
+            const double k = i % 2 == 0 ? 1.0 : 0.78;
+            const QPointF pt(c.x() + std::cos(a) * rx * k, c.y() + std::sin(a) * ry * k);
+            if (i == 0)
+                path.moveTo(pt);
+            else
+                path.lineTo(pt);
+        }
+        path.closeSubpath();
+        break;
+    }
     }
     return path;
 }
@@ -284,7 +336,18 @@ void DesignRenderer::paintContent(QPainter &p, const DesignLayer &l)
         }
         if (l.outlineWidth > 0)
             p.strokePath(path, QPen(l.outlineColor, l.outlineWidth * 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        p.fillPath(path, l.textColor);
+        if (l.textGradient) {
+            const QRectF r = path.boundingRect();
+            const double a = qDegreesToRadians(l.textGradientAngle);
+            const QPointF dir(std::cos(a), std::sin(a));
+            const double half = (std::abs(dir.x()) * r.width() + std::abs(dir.y()) * r.height()) / 2;
+            QLinearGradient g(r.center() - dir * half, r.center() + dir * half);
+            g.setColorAt(0, l.textColor);
+            g.setColorAt(1, l.textColor2);
+            p.fillPath(path, g);
+        } else {
+            p.fillPath(path, l.textColor);
+        }
         break;
     }
     case LayerType::Shape: {

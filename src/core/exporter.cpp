@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
 
@@ -85,6 +86,13 @@ QStringList audioFxChain(const AudioFx &fx, int sr)
     }
     if (fx.deEsser)
         chain << QStringLiteral("deesser=i=0.5:m=0.5:f=0.5");
+    if (fx.highpassHz > 0)
+        chain << QStringLiteral("highpass=f=%1").arg(num(std::clamp(fx.highpassHz, 20.0, 5000.0)));
+    if (fx.lowpassHz > 0)
+        chain << QStringLiteral("lowpass=f=%1").arg(num(std::clamp(fx.lowpassHz, 200.0, 20000.0)));
+    if (fx.telephone)
+        chain << QStringLiteral("highpass=f=300") << QStringLiteral("lowpass=f=3400")
+              << QStringLiteral("acompressor=threshold=0.1:ratio=6:makeup=2");
     if (fx.eqEnabled) {
         chain << QStringLiteral("bass=g=%1:f=100").arg(num(fx.lowGainDb))
               << QStringLiteral("equalizer=f=1000:t=q:w=1:g=%1").arg(num(fx.midGainDb))
@@ -102,6 +110,8 @@ QStringList audioFxChain(const AudioFx &fx, int sr)
         chain << QStringLiteral("asetrate=%1").arg(qRound(sr * f)) << QStringLiteral("aresample=%1").arg(sr)
               << atempoChain(1.0 / f);
     }
+    if (fx.chorus)
+        chain << QStringLiteral("chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3");
     if (fx.echoEnabled) {
         const double d = std::clamp(fx.echoDelayMs, 20.0, 2000.0);
         const double fb = std::clamp(fx.echoFeedback, 0.0, 0.9);
@@ -153,6 +163,8 @@ struct MotionExpr {
     QString zoom = QStringLiteral("1");
     QString dx = QStringLiteral("0");
     QString dy = QStringLiteral("0");
+    QString fx = QStringLiteral("0"); // fractions of the frame
+    QString fy = QStringLiteral("0");
 };
 
 MotionExpr motionExpr(Motion m, TimeUs duration)
@@ -187,6 +199,23 @@ MotionExpr motionExpr(Motion m, TimeUs duration)
         e.zoom = za;
         e.dy = QStringLiteral("(-%1*(1-2*%2))").arg(half, p);
         break;
+    case Motion::SlideInLeft:
+    case Motion::SlideInRight:
+    case Motion::SlideInUp:
+    case Motion::PopIn: {
+        // Mirrors motionAt(): e0 = linear progress, rem = (1-e0)^3 = 1 - eased.
+        const QString e0 = QStringLiteral("min(max(t/%1\,0)\,1)").arg(num(kEntranceSeconds));
+        const QString rem = QStringLiteral("pow(1-%1\,3)").arg(e0);
+        if (m == Motion::SlideInLeft)
+            e.fx = QStringLiteral("(-%1)").arg(rem);
+        else if (m == Motion::SlideInRight)
+            e.fx = rem;
+        else if (m == Motion::SlideInUp)
+            e.fy = rem;
+        else
+            e.zoom = QStringLiteral("if(lt(%1\,0.7)\,0.6+0.5*%1/0.7\,1.1-0.1*(%1-0.7)/0.3)").arg(e0);
+        break;
+    }
     }
     return e;
 }
@@ -216,18 +245,37 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
 
     const int idx = m.isStill() ? g.addInput(m, 0, pieceDur, fps)
                                 : g.addInput(m, c.in, c.sourceDuration() + c.toSource(handle), fps);
-    QStringList ch;
-    ch << QStringLiteral("[%1:v]setpts=(PTS-STARTPTS)%2")
-              .arg(idx)
-              .arg(qFuzzyCompare(c.speed, 1.0) || m.isStill() ? QString() : QStringLiteral("/") + num(c.speed));
+    // Shared prefix: speed, stabilisation, frame rate, held tail, length.
+    QStringList pre;
+    pre << QStringLiteral("[%1:v]setpts=(PTS-STARTPTS)%2")
+               .arg(idx)
+               .arg(qFuzzyCompare(c.speed, 1.0) || m.isStill() ? QString() : QStringLiteral("/") + num(c.speed));
     if (c.stabilize && !m.isStill())
-        ch << QStringLiteral("deshake");
-    const QSize fit = fitSize(m.resolution, frame);
-    ch << QStringLiteral("scale=%1:%2").arg(fit.width()).arg(fit.height()) << QStringLiteral("setsar=1")
-       << QStringLiteral("fps=%1").arg(num(fps));
+        pre << QStringLiteral("deshake");
+    pre << QStringLiteral("fps=%1").arg(num(fps));
     if (hold > 0)
-        ch << QStringLiteral("tpad=stop_mode=clone:stop_duration=%1").arg(secs(hold));
-    ch << QStringLiteral("trim=duration=%1").arg(secs(pieceDur)) << QStringLiteral("setpts=PTS-STARTPTS");
+        pre << QStringLiteral("tpad=stop_mode=clone:stop_duration=%1").arg(secs(hold));
+    pre << QStringLiteral("trim=duration=%1").arg(secs(pieceDur)) << QStringLiteral("setpts=PTS-STARTPTS");
+    const QSize fit = fitSize(m.resolution, frame);
+    const ClipFx &fx = c.fx;
+    QString bgLabel;
+    QStringList ch;
+    if (fx.blurFill) {
+        // A blurred, darkened copy that covers the frame sits behind the picture.
+        bgLabel = QStringLiteral("[bf%1]").arg(pieceIndex);
+        g.filters << pre.join(QLatin1Char(',')) + QStringLiteral(",split[raw%1][rawb%1]").arg(pieceIndex);
+        g.filters << QStringLiteral("[rawb%1]scale=%2:%3:force_original_aspect_ratio=increase,crop=%2:%3,setsar=1,"
+                                    "gblur=sigma=%4,eq=brightness=-0.08,format=yuva420p%5")
+                         .arg(pieceIndex)
+                         .arg(W)
+                         .arg(H)
+                         .arg(num(blurFillSigma(H)))
+                         .arg(bgLabel);
+        ch << QStringLiteral("[raw%1]null").arg(pieceIndex);
+    } else {
+        ch << pre;
+    }
+    ch << QStringLiteral("scale=%1:%2").arg(fit.width()).arg(fit.height()) << QStringLiteral("setsar=1");
 
     const Transform &tf = c.transform;
     if (tf.flipH)
@@ -237,8 +285,8 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
 
     const ColorAdjust &col = c.color;
     if (!col.isEqIdentity()) {
-        ch << QStringLiteral("eq=brightness=%1:contrast=%2:saturation=%3")
-                  .arg(num(col.brightness), num(col.contrast), num(col.saturation));
+        ch << QStringLiteral("eq=brightness=%1:contrast=%2:saturation=%3:gamma=%4")
+                  .arg(num(col.brightness), num(col.contrast), num(col.saturation), num(std::clamp(col.gamma, 0.1, 10.0)));
     }
     if (col.hasMatrix()) {
         const ColorMatrix mx = colorMatrix(col);
@@ -250,6 +298,27 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
         ch << QStringLiteral("gblur=sigma=%1").arg(num(std::max(0.1, blurSigma(col.blur, fit.height()))));
     if (col.vignette > 0)
         ch << QStringLiteral("vignette=angle=%1").arg(num(vignetteAngle(col.vignette)));
+
+    // Effects tab, in the same order as the preview (VideoView::processed).
+    if (fx.invert)
+        ch << QStringLiteral("negate");
+    if (fx.sharpen > 0)
+        ch << QStringLiteral("unsharp=5:5:%1:5:5:0").arg(num(sharpenAmount(fx.sharpen)));
+    if (fx.pixelate > 0) {
+        const int b = pixelBlock(fx.pixelate, fit.height());
+        ch << QStringLiteral("scale=%1:%2:flags=area")
+                  .arg(std::max(1, fit.width() / b))
+                  .arg(std::max(1, fit.height() / b))
+           << QStringLiteral("scale=%1:%2:flags=neighbor").arg(fit.width()).arg(fit.height());
+    }
+    if (fx.grain > 0)
+        ch << QStringLiteral("noise=alls=%1:allf=t").arg(int(std::lround(grainStrength(fx.grain))));
+    if (fx.cinemaBars) {
+        const int bar = cinemaBarHeight(fit);
+        if (bar > 0)
+            ch << QStringLiteral("drawbox=x=0:y=0:w=iw:h=%1:color=black:t=fill").arg(bar)
+               << QStringLiteral("drawbox=x=0:y=ih-%1:w=iw:h=%1:color=black:t=fill").arg(bar);
+    }
 
     ch << QStringLiteral("format=yuva420p");
     if (c.key.enabled) {
@@ -274,6 +343,10 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
                   .arg(ph)
                   .arg(int(fit.width() * cl))
                   .arg(int(fit.height() * ct));
+    }
+    if (fx.border > 0) {
+        const int b = borderPixels(fx.border, H);
+        ch << QStringLiteral("pad=iw+%1:ih+%1:%2:%2:color=%3").arg(2 * b).arg(b).arg(hexColor(fx.borderColor));
     }
     if (tf.opacity < 1.0)
         ch << QStringLiteral("colorchannelmixer=aa=%1").arg(num(std::clamp(tf.opacity, 0.0, 1.0)));
@@ -310,18 +383,19 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
     const double oy0 = (ct - cb) / 2.0 * fit.height() * s;
     const double ox = ox0 * std::cos(rad) - oy0 * std::sin(rad) + tf.x * W;
     const double oy = ox0 * std::sin(rad) + oy0 * std::cos(rad) + tf.y * H;
-    const QString xExpr = QStringLiteral("(W-w)/2+%1+%2*%3").arg(num(ox), mo.dx, num(fit.width() * s));
-    const QString yExpr = QStringLiteral("(H-h)/2+%1+%2*%3").arg(num(oy), mo.dy, num(fit.height() * s));
+    const QString xExpr = QStringLiteral("(W-w)/2+%1+%2*%3+%4*W").arg(num(ox), mo.dx, num(fit.width() * s), mo.fx);
+    const QString yExpr = QStringLiteral("(H-h)/2+%1+%2*%3+%4*H").arg(num(oy), mo.dy, num(fit.height() * s), mo.fy);
 
     const QString out = QStringLiteral("[q%1]").arg(pieceIndex);
-    g.filters << QStringLiteral("color=c=black@0:s=%1x%2:r=%3:d=%4,format=yuva420p[bg%5]")
-                     .arg(W)
-                     .arg(H)
-                     .arg(num(fps), secs(pieceDur))
-                     .arg(pieceIndex);
-    g.filters << QStringLiteral("[bg%1]%2overlay=x='%3':y='%4':format=auto:eof_action=pass,settb=AVTB%5")
-                     .arg(pieceIndex)
-                     .arg(pic, xExpr, yExpr, out);
+    if (bgLabel.isEmpty()) {
+        bgLabel = QStringLiteral("[bg%1]").arg(pieceIndex);
+        g.filters << QStringLiteral("color=c=black@0:s=%1x%2:r=%3:d=%4,format=yuva420p%5")
+                         .arg(W)
+                         .arg(H)
+                         .arg(num(fps), secs(pieceDur), bgLabel);
+    }
+    g.filters << QStringLiteral("%1%2overlay=x='%3':y='%4':format=auto:eof_action=pass,settb=AVTB%5")
+                     .arg(bgLabel, pic, xExpr, yExpr, out);
     Q_UNUSED(d)
     return out;
 }
@@ -400,9 +474,11 @@ QString Exporter::extensionFor(const ExportPreset &preset)
     return preset.container.isEmpty() ? QStringLiteral("mp4") : preset.container;
 }
 
-QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &preset, const QString &outputPath,
+QStringList Exporter::buildArguments(const ProjectData &project, const ExportPreset &preset, const QString &outputPath,
                                      QString *error)
 {
+    // Disabled clips are skipped entirely (as in the preview).
+    const ProjectData d = timeline::withoutDisabledClips(project);
     const TimeUs total = d.duration();
     if (total <= 0) {
         if (error)
@@ -441,8 +517,10 @@ QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &p
     }
 
     // ---- Audio -----------------------------------------------------------
+    // (GIFs have no sound: no audio graph at all.)
+    const bool gif = preset.container == QLatin1String("gif");
     QStringList trackLabels;
-    for (int ti = 0; ti < d.tracks.size(); ++ti) {
+    for (int ti = 0; ti < d.tracks.size() && !gif; ++ti) {
         if (!timeline::isTrackAudible(d, ti))
             continue;
         const Track &t = d.tracks[ti];
@@ -489,6 +567,8 @@ QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &p
             if (!expr.isEmpty())
                 chain << QStringLiteral("volume='%1':eval=frame").arg(expr);
         }
+        if (t.fx.mono)
+            chain << QStringLiteral("pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1");
         if (!qFuzzyIsNull(t.pan)) {
             const double l = std::min(1.0, 1.0 - t.pan);
             const double r = std::min(1.0, 1.0 + t.pan);
@@ -498,7 +578,9 @@ QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &p
         trackLabels << trackLabel;
     }
 
-    if (trackLabels.isEmpty()) {
+    if (gif) {
+        // nothing
+    } else if (trackLabels.isEmpty()) {
         g.filters << QStringLiteral("anullsrc=r=%1:cl=stereo,atrim=duration=%2[aout]").arg(sr).arg(secs(total));
     } else {
         QString mix = trackLabels.size() == 1
@@ -517,7 +599,22 @@ QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &p
     args << QStringLiteral("-y") << QStringLiteral("-hide_banner") << QStringLiteral("-nostdin")
          << QStringLiteral("-progress") << QStringLiteral("pipe:1") << QStringLiteral("-nostats");
     args << g.inputs;
+    if (gif) {
+        // Two-stage palette for clean colours; GIFs have no sound.
+        for (QString &f : g.filters) {
+            if (f.endsWith(QLatin1String("format=yuv420p[vout]"))) {
+                f.chop(QStringLiteral("format=yuv420p[vout]").size());
+                f += QStringLiteral("split[gif1][gif2];[gif1]palettegen=stats_mode=diff[gifpal];"
+                                    "[gif2][gifpal]paletteuse=dither=bayer:bayer_scale=4[vout]");
+            }
+        }
+    }
     args << QStringLiteral("-filter_complex") << g.filters.join(QLatin1Char(';'));
+    if (gif) {
+        args << QStringLiteral("-map") << QStringLiteral("[vout]") << QStringLiteral("-r") << num(fps)
+             << QStringLiteral("-loop") << QStringLiteral("0") << QStringLiteral("-t") << secs(total) << outputPath;
+        return args;
+    }
     if (!preset.isAudioOnly())
         args << QStringLiteral("-map") << QStringLiteral("[vout]");
     args << QStringLiteral("-map") << QStringLiteral("[aout]");
@@ -549,6 +646,50 @@ QStringList Exporter::buildArguments(const ProjectData &d, const ExportPreset &p
     args << QStringLiteral("-t") << secs(total);
     args << outputPath;
     return args;
+}
+
+QStringList Exporter::loudnessArguments(const ProjectData &project, QString *error)
+{
+    ExportPreset p;
+    p.name = QStringLiteral("Loudness");
+    p.container = QStringLiteral("wav");
+    p.audioCodec = QStringLiteral("pcm_s16le");
+    p.videoCodec.clear(); // audio only
+    p.width = p.height = 0;
+    p.sampleRate = 48000;
+    p.loudnessLufs = 0;
+    QStringList args = buildArguments(project, p, QStringLiteral("-"), error);
+    if (args.isEmpty())
+        return args;
+    // Measure the master: ebur128 on [aout], then discard the audio.
+    const int fi = args.indexOf(QStringLiteral("-filter_complex"));
+    QString graph = args[fi + 1];
+    const qsizetype at = graph.lastIndexOf(QStringLiteral("[aout]"));
+    graph.insert(at, QStringLiteral(",ebur128=peak=true"));
+    args[fi + 1] = graph;
+    args.removeLast(); // "-"
+    args << QStringLiteral("-f") << QStringLiteral("null") << QStringLiteral("-");
+    return args;
+}
+
+Exporter::Loudness Exporter::parseLoudness(const QString &log)
+{
+    Loudness l;
+    const qsizetype summary = log.lastIndexOf(QStringLiteral("Summary:"));
+    if (summary < 0)
+        return l;
+    const QString s = log.mid(summary);
+    static const QRegularExpression iRe(QStringLiteral("I:\\s+(-?[0-9.]+) LUFS"));
+    static const QRegularExpression lraRe(QStringLiteral("LRA:\\s+([0-9.]+) LU"));
+    static const QRegularExpression peakRe(QStringLiteral("Peak:\\s+(-?[0-9.]+|-inf) dBFS"));
+    const auto i = iRe.match(s), r = lraRe.match(s), p = peakRe.match(s);
+    if (!i.hasMatch())
+        return l;
+    l.ok = true;
+    l.integrated = i.captured(1).toDouble();
+    l.range = r.hasMatch() ? r.captured(1).toDouble() : 0;
+    l.truePeak = p.hasMatch() && p.captured(1) != QLatin1String("-inf") ? p.captured(1).toDouble() : -99;
+    return l;
 }
 
 QString Exporter::findFfmpeg()

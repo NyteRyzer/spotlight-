@@ -86,6 +86,27 @@ private slots:
         title.path = "/tmp/title.png";
         title.titleDesign = d.design.toJson();
         d.media.append(title);
+        // 50-feature pack fields.
+        c->fx.blurFill = true;
+        c->fx.border = 0.03;
+        c->fx.borderColor = QColor(255, 0, 0);
+        c->fx.pixelate = 0.2;
+        c->color.hue = 45;
+        c->color.gamma = 1.3;
+        c->enabled = false;
+        c->colorLabel = 4;
+        c->name = "Hook";
+        d.tracks[3].fx.telephone = true;
+        d.tracks[3].fx.lowpassHz = 2500;
+        d.tracks[3].fx.mono = true;
+        d.inPoint = S;
+        d.outPoint = 3 * S;
+        d.design.layers[0].textGradient = true;
+        d.design.layers[0].textColor2 = QColor(0, 0, 255);
+        DesignLayer burst = shape;
+        burst.id = QUuid::createUuid();
+        burst.shape = ShapeKind::Burst;
+        d.design.layers.append(burst);
 
         ProjectData back;
         QString err;
@@ -111,6 +132,35 @@ private slots:
         QCOMPARE(back.design.layers[2].strokes.size(), 1);
         QCOMPARE(back.design.layers[2].strokes[0].points[1], QPointF(30.5, 40));
         QVERIFY(back.media.last().isTitle());
+        QVERIFY(back.clipById(id)->fx == d.clipById(id)->fx);
+        QCOMPARE(back.clipById(id)->color.hue, 45.0);
+        QCOMPARE(back.clipById(id)->color.gamma, 1.3);
+        QVERIFY(!back.clipById(id)->enabled);
+        QCOMPARE(back.clipById(id)->colorLabel, 4);
+        QCOMPARE(back.clipById(id)->name, QStringLiteral("Hook"));
+        QVERIFY(back.tracks[3].fx.telephone && back.tracks[3].fx.mono);
+        QCOMPARE(back.tracks[3].fx.lowpassHz, 2500.0);
+        QCOMPARE(back.inPoint, S);
+        QCOMPARE(back.outPoint, 3 * S);
+        QVERIFY(back.design.layers[0].textGradient);
+        QCOMPARE(back.design.layers.last().shape, ShapeKind::Burst);
+    }
+
+    void saveKeepsBackups()
+    {
+        QTemporaryDir tmp;
+        Project p;
+        const QString path = tmp.path() + "/show.spotlight";
+        QString err;
+        QVERIFY2(p.saveAs(path, &err), qPrintable(err));
+        QVERIFY(!QDir(tmp.path() + "/Backups").exists()); // nothing to back up yet
+        p.edit("Change", [](ProjectData &d) { d.addTrack(TrackType::Video); });
+        QVERIFY(p.save(&err));
+        const QStringList backups = QDir(tmp.path() + "/Backups").entryList({"show *.spotlight"});
+        QCOMPARE(backups.size(), 1);
+        ProjectData old;
+        QVERIFY(loadProjectFile(tmp.path() + "/Backups/" + backups.first(), &old, &err));
+        QCOMPARE(old.tracks.size(), 4); // the version before the change
     }
 
     void rejectsForeignFiles()

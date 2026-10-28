@@ -56,11 +56,12 @@ QStringList blendModeNames()
 QStringList shapeKindNames()
 {
     return {QStringLiteral("Rectangle"), QStringLiteral("Ellipse"), QStringLiteral("Triangle"),
-            QStringLiteral("Star"),      QStringLiteral("Arrow"),   QStringLiteral("Line")};
+            QStringLiteral("Star"),      QStringLiteral("Arrow"),   QStringLiteral("Line"),
+            QStringLiteral("Speech Bubble"), QStringLiteral("Burst")};
 }
 
 namespace {
-const char *const kShapeIds[] = {"rectangle", "ellipse", "triangle", "star", "arrow", "line"};
+const char *const kShapeIds[] = {"rectangle", "ellipse", "triangle", "star", "arrow", "line", "speech", "burst"};
 }
 
 QJsonObject DesignLayer::toJson() const
@@ -117,6 +118,9 @@ QJsonObject DesignLayer::toJson() const
         o["cropB"] = cropBottom;
         o["fadeDirection"] = fadeDirection;
         o["fadeAmount"] = fadeAmount;
+        o["tint"] = tint;
+        o["tintColor"] = colorToString(tintColor);
+        o["tintAmount"] = tintAmount;
         break;
     case LayerType::Text:
         o["text"] = text;
@@ -131,6 +135,9 @@ QJsonObject DesignLayer::toJson() const
         o["letterSpacing"] = letterSpacing;
         o["align"] = align;
         o["lineHeight"] = lineHeight;
+        o["textGradient"] = textGradient;
+        o["textColor2"] = colorToString(textColor2);
+        o["textGradientAngle"] = textGradientAngle;
         o["textBox"] = textBox;
         o["textBoxColor"] = colorToString(textBoxColor);
         o["textBoxPadding"] = textBoxPadding;
@@ -213,6 +220,9 @@ DesignLayer DesignLayer::fromJson(const QJsonObject &o)
     l.cropBottom = o["cropB"].toDouble(0.0);
     l.fadeDirection = o["fadeDirection"].toInt(0);
     l.fadeAmount = o["fadeAmount"].toDouble(0.0);
+    l.tint = o["tint"].toBool();
+    l.tintColor = colorFromValue(o["tintColor"], QColor(255, 120, 0));
+    l.tintAmount = o["tintAmount"].toDouble(0.5);
     l.text = o["text"].toString();
     l.fontFamily = o["fontFamily"].toString();
     l.fontSize = o["fontSize"].toInt(96);
@@ -225,6 +235,9 @@ DesignLayer DesignLayer::fromJson(const QJsonObject &o)
     l.letterSpacing = o["letterSpacing"].toDouble(0.0);
     l.align = std::clamp(o["align"].toInt(0), 0, 2);
     l.lineHeight = o["lineHeight"].toDouble(1.0);
+    l.textGradient = o["textGradient"].toBool();
+    l.textColor2 = colorFromValue(o["textColor2"], QColor(255, 120, 0));
+    l.textGradientAngle = o["textGradientAngle"].toDouble(90.0);
     l.textBox = o["textBox"].toBool();
     l.textBoxColor = colorFromValue(o["textBoxColor"], QColor(0, 0, 0, 170));
     l.textBoxPadding = o["textBoxPadding"].toDouble(0.3);

@@ -130,7 +130,7 @@ int runSelfTest(const QString &outDirArg)
     r.add(!ffmpeg.isEmpty() && bundled(ffmpeg), QStringLiteral("ffmpeg found"), ffmpeg);
     r.add(!ffprobe.isEmpty() && bundled(ffprobe), QStringLiteral("ffprobe found"), ffprobe);
     QString ver;
-    r.add(!ffmpeg.isEmpty() && run(ffmpeg, {QStringLiteral("-hide_banner"), QStringLiteral("-version")}, &ver) == 0,
+    r.add(!ffmpeg.isEmpty() && run(ffmpeg, {QStringLiteral("-version")}, &ver) == 0,
           QStringLiteral("ffmpeg runs"), ver.trimmed().section(QLatin1Char('\n'), 0, 0));
     if (ffmpeg.isEmpty() || ffprobe.isEmpty()) {
         r.add(false, QStringLiteral("remaining checks"), QStringLiteral("skipped: FFmpeg missing"));

@@ -7,6 +7,8 @@
 #include <QUuid>
 #include <QVector>
 
+#include <cmath>
+
 namespace spotlight {
 
 // Per-clip colour correction and looks (Video Studio).
@@ -25,12 +27,19 @@ struct ColorAdjust {
     MonoMode mono = MonoMode::None;
     double vignette = 0.0;    //  0 .. 1
     double blur = 0.0;        //  0 .. 1 (Gaussian, up to ~2% of the frame height)
+    double hue = 0.0;         // degrees, rotation about the grey axis (part of the matrix)
+    double gamma = 1.0;       // midtones: 0.3 (darker) .. 3 (brighter), FFmpeg eq gamma
 
     bool isEqIdentity() const
     {
-        return qFuzzyIsNull(brightness) && qFuzzyCompare(contrast, 1.0) && qFuzzyCompare(saturation, 1.0);
+        return qFuzzyIsNull(brightness) && qFuzzyCompare(contrast, 1.0) && qFuzzyCompare(saturation, 1.0)
+            && qFuzzyCompare(gamma, 1.0);
     }
-    bool hasMatrix() const { return !qFuzzyIsNull(temperature) || !qFuzzyIsNull(tint) || mono != MonoMode::None; }
+    bool hasMatrix() const
+    {
+        return !qFuzzyIsNull(temperature) || !qFuzzyIsNull(tint) || mono != MonoMode::None
+            || !qFuzzyIsNull(std::fmod(hue, 360.0));
+    }
     bool isIdentity() const
     {
         return isEqIdentity() && !hasMatrix() && qFuzzyIsNull(vignette) && qFuzzyIsNull(blur);
@@ -40,7 +49,8 @@ struct ColorAdjust {
         return qFuzzyCompare(1 + brightness, 1 + o.brightness) && qFuzzyCompare(contrast, o.contrast)
             && qFuzzyCompare(saturation, o.saturation) && qFuzzyCompare(1 + temperature, 1 + o.temperature)
             && qFuzzyCompare(1 + tint, 1 + o.tint) && mono == o.mono && qFuzzyCompare(1 + vignette, 1 + o.vignette)
-            && qFuzzyCompare(1 + blur, 1 + o.blur);
+            && qFuzzyCompare(1 + blur, 1 + o.blur) && qFuzzyCompare(1 + hue, 1 + o.hue)
+            && qFuzzyCompare(gamma, o.gamma);
     }
     bool operator!=(const ColorAdjust &o) const { return !(*this == o); }
 };
@@ -77,8 +87,34 @@ struct Transform {
     }
 };
 
-// Animated "Ken Burns" camera move over the clip's length.
-enum class Motion { None, ZoomIn, ZoomOut, PanLeft, PanRight, PanUp, PanDown };
+// Picture effects applied after colour (Video Studio, Effects tab).
+struct ClipFx {
+    double sharpen = 0.0;      // 0 .. 1 (unsharp mask)
+    double grain = 0.0;        // 0 .. 1 (film grain)
+    bool invert = false;       // colour negative
+    double pixelate = 0.0;     // 0 .. 1 (mosaic; block = up to 1/16 of the height)
+    bool cinemaBars = false;   // 2.39:1 letterbox bars over the picture
+    bool blurFill = false;     // fill empty space with a blurred, zoomed copy (vertical video)
+    double border = 0.0;       // outline width as a fraction of the frame height (PIP frame)
+    QColor borderColor = Qt::white;
+
+    bool isNone() const
+    {
+        return qFuzzyIsNull(sharpen) && qFuzzyIsNull(grain) && !invert && qFuzzyIsNull(pixelate) && !cinemaBars
+            && !blurFill && qFuzzyIsNull(border);
+    }
+    bool operator==(const ClipFx &o) const
+    {
+        return qFuzzyCompare(1 + sharpen, 1 + o.sharpen) && qFuzzyCompare(1 + grain, 1 + o.grain)
+            && invert == o.invert && qFuzzyCompare(1 + pixelate, 1 + o.pixelate) && cinemaBars == o.cinemaBars
+            && blurFill == o.blurFill && qFuzzyCompare(1 + border, 1 + o.border) && borderColor == o.borderColor;
+    }
+};
+
+// Animated camera moves ("Ken Burns", over the whole clip) and entrance
+// animations (over the first kEntranceSeconds, e.g. for titles).
+enum class Motion { None, ZoomIn, ZoomOut, PanLeft, PanRight, PanUp, PanDown, SlideInLeft, SlideInRight,
+                    SlideInUp, PopIn };
 
 // Green/blue screen removal (FFmpeg chromakey semantics).
 struct ChromaKey {
@@ -127,6 +163,10 @@ struct Clip {
     ChromaKey key;
     Transition transition; // video tracks only
     bool stabilize = false; // video: smooth camera shake on export
+    ClipFx fx;             // video tracks only
+    bool enabled = true;   // disabled clips are skipped in preview and export
+    int colorLabel = 0;    // 0 = default, 1..8 = label colours (see clipLabelColors())
+    QString name;          // optional display name (default: the media name)
 
     TimeUs sourceDuration() const { return out - in; }
     TimeUs duration() const
@@ -148,6 +188,13 @@ struct Clip {
         return qFuzzyCompare(speed, 1.0) ? sourceDelta : TimeUs(double(sourceDelta) / speed);
     }
 };
+
+// Timeline clip label colours (index 1..8; 0 = the default clip colour).
+inline QVector<QColor> clipLabelColors()
+{
+    return {QColor(), QColor(226, 70, 70), QColor(238, 140, 40), QColor(232, 200, 40), QColor(80, 190, 90),
+            QColor(50, 180, 190), QColor(70, 120, 230), QColor(150, 90, 220), QColor(220, 90, 170)};
+}
 
 enum class TrackType { Video, Audio };
 
@@ -182,6 +229,12 @@ struct AudioFx {
     bool limiterEnabled = false;  // brick-wall ceiling
     double limiterCeilingDb = -1.0;
 
+    bool telephone = false;       // narrow band-pass "phone / radio" voice
+    double lowpassHz = 0.0;       // 0 = off; muffles above the cutoff
+    double highpassHz = 0.0;      // 0 = off; thins out below the cutoff
+    bool chorus = false;          // thicker, doubled sound
+    bool mono = false;            // fold both channels to the centre
+
     // Auto-ducking: lower this track while clips play on any track marked
     // as a voice track (e.g. music under dialogue).
     bool duckUnderVoice = false;
@@ -190,7 +243,8 @@ struct AudioFx {
     bool isNeutral() const
     {
         return !eqEnabled && !compressorEnabled && !dialogueCleanup && !gateEnabled && !deEsser
-            && qFuzzyIsNull(pitchSemitones) && !reverbEnabled && !echoEnabled && !limiterEnabled;
+            && qFuzzyIsNull(pitchSemitones) && !reverbEnabled && !echoEnabled && !limiterEnabled && !telephone
+            && qFuzzyIsNull(lowpassHz) && qFuzzyIsNull(highpassHz) && !chorus && !mono;
     }
 };
 

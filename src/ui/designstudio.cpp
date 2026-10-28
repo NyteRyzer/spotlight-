@@ -722,7 +722,12 @@ void DesignStudio::addShape(ShapeKind kind)
     case ShapeKind::Ellipse:
     case ShapeKind::Star:
     case ShapeKind::Triangle:
+    case ShapeKind::Burst:
         l.shapeSize = QSize(canvas.height() / 3, canvas.height() / 3);
+        break;
+    case ShapeKind::SpeechBubble:
+        l.shapeSize = QSize(canvas.width() / 3, canvas.height() / 4);
+        l.fillColor = Qt::white;
         break;
     case ShapeKind::Arrow:
         l.shapeSize = QSize(canvas.width() / 4, canvas.height() / 6);

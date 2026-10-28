@@ -41,6 +41,16 @@ public:
     // Media files used on the timeline that no longer exist on disk.
     static QStringList missingMedia(const ProjectData &project);
 
+    // Loudness of the finished mix (EBU R128), measured without writing a file.
+    struct Loudness {
+        bool ok = false;
+        double integrated = 0; // LUFS
+        double range = 0;      // LU
+        double truePeak = 0;   // dBTP
+    };
+    static QStringList loudnessArguments(const ProjectData &project, QString *error);
+    static Loudness parseLoudness(const QString &log);
+
     // Default file extension for a preset's container.
     static QString extensionFor(const ExportPreset &preset);
 

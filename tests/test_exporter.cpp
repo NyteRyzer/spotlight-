@@ -1,4 +1,5 @@
 #include "core/exporter.h"
+#include "core/beats.h"
 #include "core/highlights.h"
 #include "core/looks.h"
 #include "core/titles.h"
@@ -158,6 +159,144 @@ private slots:
         QVERIFY(QFileInfo(out).size() > 1000);
     }
 
+
+
+    // ---- 50-feature pack: export --------------------------------------------
+    void newVideoEffectsRender()
+    {
+        const QString ffmpeg = Exporter::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg not installed", "");
+        QTemporaryDir tmp;
+        const QString red = tmp.path() + "/red.mp4", tall = tmp.path() + "/tall.mp4", src = tmp.path() + "/src.mp4";
+        QVERIFY(makeMedia(ffmpeg, red, "color=c=red:s=320x180:r=25", 3));
+        QVERIFY(makeMedia(ffmpeg, tall, "color=c=0x00ff00:s=180x320:r=25", 3));
+        QVERIFY(makeMedia(ffmpeg, src, "testsrc2=s=320x180:r=25", 3));
+
+        // 1) Invert + cinema bars on red: cyan picture with black bars.
+        ProjectData d = ProjectData::createDefault();
+        const QUuid mr = addFile(d, red, 3 * S, {320, 180});
+        const QUuid a = timeline::placeMedia(d, mr, 0, 0, 0, 3 * S);
+        d.clipById(a)->fx.invert = true;
+        d.clipById(a)->fx.cinemaBars = true;
+        QString log;
+        QVERIFY2(render(d, smallPreset(), tmp.path() + "/inv.mp4", &log), qPrintable(log));
+        const QColor mid = pixelAt(ffmpeg, tmp.path() + "/inv.mp4", 1, 160, 90, 320, 180);
+        QVERIFY2(mid.red() < 60 && mid.green() > 200 && mid.blue() > 200, qPrintable(mid.name()));
+        const QColor top = pixelAt(ffmpeg, tmp.path() + "/inv.mp4", 1, 160, 5, 320, 180);
+        QVERIFY2(top.red() < 30 && top.green() < 30 && top.blue() < 30, qPrintable(top.name()));
+
+        // 2) Blur fill: a vertical green clip fills the sides with its blurred copy.
+        ProjectData v = ProjectData::createDefault();
+        const QUuid mt = addFile(v, tall, 3 * S, {180, 320});
+        const QUuid b = timeline::placeMedia(v, mt, 0, 0, 0, 3 * S);
+        v.clipById(b)->fx.blurFill = true;
+        v.clipById(b)->fx.border = 0.02;
+        QVERIFY2(render(v, smallPreset(), tmp.path() + "/fill.mp4", &log), qPrintable(log));
+        const QColor side = pixelAt(ffmpeg, tmp.path() + "/fill.mp4", 1, 20, 90, 320, 180);
+        QVERIFY2(side.green() > 120 && side.red() < 80, qPrintable(side.name())); // not black
+        const QColor edge = pixelAt(ffmpeg, tmp.path() + "/fill.mp4", 1, 160 - 51 - 1, 90, 320, 180);
+        QVERIFY2(edge.red() > 200 && edge.green() > 200 && edge.blue() > 200, qPrintable(edge.name())); // white border
+
+        // 3) Everything else at once renders (sharpen, grain, pixelate, hue,
+        //    gamma, entrance animation, new audio effects).
+        ProjectData e = ProjectData::createDefault();
+        const QUuid ms = addFile(e, src, 3 * S, {320, 180});
+        const QUuid c = timeline::placeMedia(e, ms, 0, 0, 0, 3 * S);
+        Clip *cc = e.clipById(c);
+        cc->fx.sharpen = 0.5;
+        cc->fx.grain = 0.5;
+        cc->fx.pixelate = 0.3;
+        cc->color.hue = 90;
+        cc->color.gamma = 1.4;
+        cc->motion = Motion::SlideInLeft;
+        const QUuid t2 = timeline::placeMedia(e, ms, 1, 0, 0, 2 * S);
+        e.clipById(t2)->motion = Motion::PopIn;
+        e.clipById(t2)->transform.scale = 0.4;
+        AudioFx &fx = e.tracks[e.audioTrackIndices()[0]].fx;
+        fx.telephone = fx.chorus = fx.mono = true;
+        fx.lowpassHz = 5000;
+        fx.highpassHz = 120;
+        QVERIFY2(render(e, smallPreset(), tmp.path() + "/all.mp4", &log), qPrintable(log));
+        QVERIFY(std::abs(durationOf(tmp.path() + "/all.mp4") - 3.0) < 0.15);
+        // The slide-in starts off-screen: at t=0 the left of V1 shows black.
+        const QColor start = pixelAt(ffmpeg, tmp.path() + "/all.mp4", 0, 40, 150, 320, 180);
+        QVERIFY2(start.red() < 40 && start.green() < 40 && start.blue() < 40, qPrintable(start.name()));
+    }
+
+    void gifRangeAndLoudness()
+    {
+        const QString ffmpeg = Exporter::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg not installed", "");
+        QTemporaryDir tmp;
+        const QString src = tmp.path() + "/src.mp4";
+        QVERIFY(makeMedia(ffmpeg, src, "testsrc2=s=320x180:r=25", 6));
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addFile(d, src, 6 * S, {320, 180});
+        timeline::placeMedia(d, m, 0, 0, 0, 6 * S);
+
+        // GIF of the In/Out range (2 s .. 4 s).
+        ExportPreset gif;
+        for (const auto &p : builtInExportPresets()) {
+            if (p.container == "gif")
+                gif = p;
+        }
+        QCOMPARE(gif.container, QStringLiteral("gif"));
+        gif.width = 160;
+        gif.height = 90;
+        QString log;
+        const QString out = tmp.path() + "/clip.gif";
+        QVERIFY2(render(timeline::rangeProject(d, 2 * S, 4 * S), gif, out, &log), qPrintable(log));
+        QProcess probe;
+        probe.start(Exporter::findFfprobe(), {"-v", "error", "-show_entries", "stream=codec_name,width",
+                                             "-of", "csv=p=0", out});
+        probe.waitForFinished(30000);
+        QCOMPARE(QString::fromUtf8(probe.readAllStandardOutput()).trimmed(), QStringLiteral("gif,160"));
+        QVERIFY(std::abs(durationOf(out) - 2.0) < 0.3);
+
+        // Loudness of the mix: a 330 Hz sine at moderate level.
+        QString err;
+        const QStringList args = Exporter::loudnessArguments(d, &err);
+        QVERIFY2(!args.isEmpty(), qPrintable(err));
+        QProcess p;
+        p.setProcessChannelMode(QProcess::MergedChannels);
+        p.start(ffmpeg, args);
+        QVERIFY(p.waitForFinished(60000));
+        const auto l = Exporter::parseLoudness(QString::fromUtf8(p.readAll()));
+        QVERIFY(l.ok);
+        QVERIFY2(l.integrated < -5 && l.integrated > -40, qPrintable(QString::number(l.integrated)));
+        QVERIFY(l.truePeak < 0.5);
+    }
+
+    void detectsTempo()
+    {
+        const QString ffmpeg = Exporter::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg not installed", "");
+        QTemporaryDir tmp;
+        const QString song = tmp.path() + "/song.wav";
+        // A 128 BPM kick pattern starting at 0.25 s over a quiet pad.
+        QProcess gen;
+        gen.start(ffmpeg, {"-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                           "aevalsrc='0.05*sin(2*PI*220*t)+0.9*sin(2*PI*60*t)*exp(-25*mod(t-0.25+10*60/128\\,60/128))"
+                           "*gte(t\\,0.25)':s=44100:d=20",
+                           song});
+        QVERIFY(gen.waitForFinished(60000));
+        QCOMPARE(gen.exitCode(), 0);
+        QProcess p;
+        p.setProcessChannelMode(QProcess::MergedChannels);
+        p.start(ffmpeg, beats::analysisArgs(song, 0, 20 * S));
+        QVERIFY(p.waitForFinished(60000));
+        const auto env = beats::parseEnvelope(QString::fromUtf8(p.readAll()));
+        QVERIFY(env.size() > 1900);
+        const auto tempo = beats::estimateTempo(env);
+        QVERIFY2(std::abs(tempo.bpm - 128) < 1.5, qPrintable(QString::number(tempo.bpm)));
+        // The grid lands on a kick (0.25 s + k * 60/128).
+        const double period = 60.0 / 128;
+        const double phase = std::fmod(tempo.firstBeat - 0.25 + 10 * period, period);
+        QVERIFY2(phase < 0.05 || phase > period - 0.05, qPrintable(QString::number(tempo.firstBeat)));
+    }
 
     // ---- Auto-Clip ----------------------------------------------------------
     void highlightsFromSignals()

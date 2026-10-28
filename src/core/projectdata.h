@@ -41,6 +41,9 @@ struct ProjectData {
     QVector<Track> tracks; // video tracks first (V1 = bottom), then audio tracks
     DesignDocument design;
     QVector<Marker> markers; // kept sorted by time
+    TimeUs inPoint = -1;     // timeline In/Out range (-1 = not set)
+    TimeUs outPoint = -1;
+    bool hasRange() const { return inPoint >= 0 && outPoint > inPoint; }
 
     // Lookup helpers -------------------------------------------------------
     const MediaItem *mediaById(const QUuid &id) const;

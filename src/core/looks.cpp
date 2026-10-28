@@ -53,6 +53,17 @@ ColorMatrix colorMatrix(const ColorAdjust &c)
         const ColorMatrix sepia{0.393, 0.769, 0.189, 0.349, 0.686, 0.168, 0.272, 0.534, 0.131};
         m = multiply(sepia, m);
     }
+    if (!qFuzzyIsNull(std::fmod(c.hue, 360.0))) {
+        // Rotation about the luma axis (the standard hue-rotate matrix).
+        const double a = c.hue * M_PI / 180.0;
+        const double co = std::cos(a), si = std::sin(a);
+        const ColorMatrix h{0.213 + co * 0.787 - si * 0.213, 0.715 - co * 0.715 - si * 0.715,
+                            0.072 - co * 0.072 + si * 0.928, 0.213 - co * 0.213 + si * 0.143,
+                            0.715 + co * 0.285 + si * 0.140, 0.072 - co * 0.072 - si * 0.283,
+                            0.213 - co * 0.213 - si * 0.787, 0.715 - co * 0.715 + si * 0.715,
+                            0.072 + co * 0.928 + si * 0.072};
+        m = multiply(h, m);
+    }
     return m;
 }
 
@@ -64,6 +75,37 @@ double vignetteAngle(double amount)
 double blurSigma(double amount, int frameHeight)
 {
     return std::clamp(amount, 0.0, 1.0) * 0.02 * frameHeight;
+}
+
+double sharpenAmount(double amount)
+{
+    return std::clamp(amount, 0.0, 1.0) * 2.0;
+}
+
+int pixelBlock(double amount, int height)
+{
+    return std::max(2, int(std::lround(std::clamp(amount, 0.0, 1.0) * height / 16.0)));
+}
+
+double grainStrength(double amount)
+{
+    return std::clamp(amount, 0.0, 1.0) * 40.0;
+}
+
+int cinemaBarHeight(const QSize &picture)
+{
+    const double visible = picture.width() / 2.39;
+    return std::max(0, int((picture.height() - visible) / 2.0));
+}
+
+int borderPixels(double amount, int frameHeight)
+{
+    return std::max(2, int(std::lround(std::clamp(amount, 0.0, 0.2) * frameHeight / 2.0)) * 2);
+}
+
+double blurFillSigma(int frameHeight)
+{
+    return std::max(4.0, frameHeight / 30.0);
 }
 
 QVector<LookPreset> lookPresets()
@@ -112,13 +154,22 @@ QString transitionName(const QString &id)
 QStringList motionNames()
 {
     auto tr = [](const char *s) { return QCoreApplication::translate("Motion", s); };
-    return {tr("None"),     tr("Zoom In"),   tr("Zoom Out"), tr("Pan Left"),
-            tr("Pan Right"), tr("Pan Up"),   tr("Pan Down")};
+    return {tr("None"),          tr("Zoom In"),        tr("Zoom Out"),     tr("Pan Left"),
+            tr("Pan Right"),     tr("Pan Up"),         tr("Pan Down"),     tr("Slide In from Left"),
+            tr("Slide In from Right"), tr("Slide In from Bottom"), tr("Pop In")};
 }
 
-MotionState motionAt(Motion m, double p)
+bool isEntrance(Motion m)
+{
+    return m == Motion::SlideInLeft || m == Motion::SlideInRight || m == Motion::SlideInUp || m == Motion::PopIn;
+}
+
+MotionState motionAt(Motion m, double p, double elapsed)
 {
     p = std::clamp(p, 0.0, 1.0);
+    // Entrances ease out (cubic) over kEntranceSeconds.
+    const double e0 = std::clamp(elapsed / kEntranceSeconds, 0.0, 1.0);
+    const double e = 1.0 - (1.0 - e0) * (1.0 - e0) * (1.0 - e0);
     const double a = kMotionAmount;
     MotionState s;
     switch (m) {
@@ -147,6 +198,19 @@ MotionState motionAt(Motion m, double p)
     case Motion::PanDown:
         s.zoom = 1.0 + a;
         s.dy = -a / 2.0 * (1.0 - 2.0 * p);
+        break;
+    case Motion::SlideInLeft:
+        s.fx = -(1.0 - e);
+        break;
+    case Motion::SlideInRight:
+        s.fx = 1.0 - e;
+        break;
+    case Motion::SlideInUp:
+        s.fy = 1.0 - e;
+        break;
+    case Motion::PopIn:
+        // Grow from 60 % with a small overshoot, then settle.
+        s.zoom = e0 < 0.7 ? 0.6 + 0.5 * (e0 / 0.7) : 1.1 - 0.1 * ((e0 - 0.7) / 0.3);
         break;
     }
     return s;

@@ -2,6 +2,9 @@
 
 #include "core/titles.h"
 
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QUndoCommand>
@@ -125,8 +128,29 @@ bool Project::save(QString *error)
     return saveAs(m_filePath, error);
 }
 
+namespace {
+// Keeps a timestamped copy of the file about to be overwritten.
+void backupBeforeSave(const QString &path)
+{
+    const QFileInfo fi(path);
+    if (!fi.exists())
+        return;
+    const QString dir = fi.absolutePath() + QStringLiteral("/Backups");
+    if (!QDir().mkpath(dir))
+        return;
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+    QFile::copy(path, QStringLiteral("%1/%2 %3.spotlight").arg(dir, fi.completeBaseName(), stamp));
+    QDir d(dir);
+    const QStringList old = d.entryList({fi.completeBaseName() + QStringLiteral(" *.spotlight")}, QDir::Files,
+                                        QDir::Name);
+    for (int i = 0; i + Project::kBackupCount < old.size(); ++i)
+        d.remove(old[i]);
+}
+} // namespace
+
 bool Project::saveAs(const QString &path, QString *error)
 {
+    backupBeforeSave(path);
     ProjectData copy = m_data;
     copy.name = QFileInfo(path).completeBaseName();
     if (!saveProjectFile(copy, path, error))

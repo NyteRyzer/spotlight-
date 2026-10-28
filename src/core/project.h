@@ -50,6 +50,9 @@ public:
     // Incremented on every change; lets autosave detect unsaved work cheaply.
     quint64 revision() const { return m_revision; }
 
+    // Saving over an existing file first copies it to "Backups/" next to
+    // the project (the last kBackupCount versions are kept).
+    static constexpr int kBackupCount = 10;
     bool save(QString *error);
     bool saveAs(const QString &path, QString *error);
     bool open(const QString &path, QString *error);

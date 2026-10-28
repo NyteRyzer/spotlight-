@@ -49,6 +49,8 @@ QJsonObject clipToJson(const Clip &c)
         col["mono"] = int(c.color.mono);
         col["vignette"] = c.color.vignette;
         col["blur"] = c.color.blur;
+        col["hue"] = c.color.hue;
+        col["gamma"] = c.color.gamma;
         o["color"] = col;
     }
     if (!c.transform.isIdentity()) {
@@ -84,6 +86,24 @@ QJsonObject clipToJson(const Clip &c)
     }
     if (c.stabilize)
         o["stabilize"] = true;
+    if (!c.fx.isNone()) {
+        QJsonObject fx;
+        fx["sharpen"] = c.fx.sharpen;
+        fx["grain"] = c.fx.grain;
+        fx["invert"] = c.fx.invert;
+        fx["pixelate"] = c.fx.pixelate;
+        fx["cinemaBars"] = c.fx.cinemaBars;
+        fx["blurFill"] = c.fx.blurFill;
+        fx["border"] = c.fx.border;
+        fx["borderColor"] = c.fx.borderColor.name();
+        o["fx"] = fx;
+    }
+    if (!c.enabled)
+        o["enabled"] = false;
+    if (c.colorLabel > 0)
+        o["label"] = c.colorLabel;
+    if (!c.name.isEmpty())
+        o["name"] = c.name;
     return o;
 }
 
@@ -109,6 +129,8 @@ Clip clipFromJson(const QJsonObject &o)
     c.color.mono = MonoMode(std::clamp(col["mono"].toInt(0), 0, 2));
     c.color.vignette = col["vignette"].toDouble(0.0);
     c.color.blur = col["blur"].toDouble(0.0);
+    c.color.hue = col["hue"].toDouble(0.0);
+    c.color.gamma = col["gamma"].toDouble(1.0);
     const QJsonObject tf = o["transform"].toObject();
     c.transform.scale = tf["scale"].toDouble(1.0);
     c.transform.x = tf["x"].toDouble(0.0);
@@ -121,7 +143,7 @@ Clip clipFromJson(const QJsonObject &o)
     c.transform.cropTop = tf["cropT"].toDouble(0.0);
     c.transform.cropRight = tf["cropR"].toDouble(0.0);
     c.transform.cropBottom = tf["cropB"].toDouble(0.0);
-    c.motion = Motion(std::clamp(o["motion"].toInt(0), 0, int(Motion::PanDown)));
+    c.motion = Motion(std::clamp(o["motion"].toInt(0), 0, int(Motion::PopIn)));
     if (o.contains("chromaKey")) {
         const QJsonObject k = o["chromaKey"].toObject();
         c.key.enabled = true;
@@ -133,6 +155,18 @@ Clip clipFromJson(const QJsonObject &o)
     c.transition.type = tr["type"].toString();
     c.transition.duration = TimeUs(tr["duration"].toDouble());
     c.stabilize = o["stabilize"].toBool();
+    const QJsonObject fx = o["fx"].toObject();
+    c.fx.sharpen = fx["sharpen"].toDouble(0.0);
+    c.fx.grain = fx["grain"].toDouble(0.0);
+    c.fx.invert = fx["invert"].toBool();
+    c.fx.pixelate = fx["pixelate"].toDouble(0.0);
+    c.fx.cinemaBars = fx["cinemaBars"].toBool();
+    c.fx.blurFill = fx["blurFill"].toBool();
+    c.fx.border = fx["border"].toDouble(0.0);
+    c.fx.borderColor = QColor(fx["borderColor"].toString(QStringLiteral("#ffffff")));
+    c.enabled = o["enabled"].toBool(true);
+    c.colorLabel = std::clamp(o["label"].toInt(0), 0, 8);
+    c.name = o["name"].toString();
     return c;
 }
 
@@ -159,6 +193,11 @@ QJsonObject fxToJson(const AudioFx &fx)
     o["echoFeedback"] = fx.echoFeedback;
     o["limiter"] = fx.limiterEnabled;
     o["limiterCeiling"] = fx.limiterCeilingDb;
+    o["telephone"] = fx.telephone;
+    o["lowpass"] = fx.lowpassHz;
+    o["highpass"] = fx.highpassHz;
+    o["chorus"] = fx.chorus;
+    o["mono"] = fx.mono;
     o["duck"] = fx.duckUnderVoice;
     o["duckAmount"] = fx.duckAmountDb;
     return o;
@@ -187,6 +226,11 @@ AudioFx fxFromJson(const QJsonObject &o)
     fx.echoFeedback = o["echoFeedback"].toDouble(0.35);
     fx.limiterEnabled = o["limiter"].toBool();
     fx.limiterCeilingDb = o["limiterCeiling"].toDouble(-1.0);
+    fx.telephone = o["telephone"].toBool();
+    fx.lowpassHz = o["lowpass"].toDouble(0.0);
+    fx.highpassHz = o["highpass"].toDouble(0.0);
+    fx.chorus = o["chorus"].toBool();
+    fx.mono = o["mono"].toBool();
     fx.duckUnderVoice = o["duck"].toBool();
     fx.duckAmountDb = o["duckAmount"].toDouble(-12.0);
     return fx;
@@ -359,6 +403,10 @@ QJsonObject ProjectData::toJson(const QString &projectDir) const
         markerArr.append(o);
     }
     root["markers"] = markerArr;
+    if (hasRange()) {
+        root["in"] = double(inPoint);
+        root["out"] = double(outPoint);
+    }
     return root;
 }
 
@@ -447,6 +495,10 @@ bool ProjectData::fromJson(const QJsonObject &root, ProjectData *out, QString *e
     for (const auto &v : root["markers"].toArray()) {
         const QJsonObject o = v.toObject();
         d.markers.append({uuidOrNew(o["id"]), TimeUs(o["time"].toDouble()), o["name"].toString()});
+    }
+    if (root.contains("in") && root.contains("out")) {
+        d.inPoint = TimeUs(root["in"].toDouble());
+        d.outPoint = TimeUs(root["out"].toDouble());
     }
     std::sort(d.markers.begin(), d.markers.end(), [](const Marker &a, const Marker &b) { return a.time < b.time; });
     *out = d;

@@ -4,6 +4,7 @@
 #include "core/titles.h"
 #include "testutil.h"
 
+#include <QTemporaryDir>
 #include <QtTest>
 
 using namespace spotlight;
@@ -426,6 +427,25 @@ private slots:
         checkInvariants(d);
     }
 
+    void ripplesMoveMarkers()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 20 * S);
+        timeline::placeMedia(d, m, 0, 0, 0, 20 * S);
+        timeline::toggleMarker(d, 2 * S, 0, "before");
+        timeline::toggleMarker(d, 6 * S, 0, "inside");
+        timeline::toggleMarker(d, 12 * S, 0, "after");
+        timeline::rippleDeleteRange(d, 5 * S, 8 * S);
+        QCOMPARE(d.markers.size(), 3);
+        QCOMPARE(d.markers[0].time, 2 * S);
+        QCOMPARE(d.markers[1].time, 5 * S); // moved to the cut
+        QCOMPARE(d.markers[2].time, 9 * S); // followed its material
+        timeline::insertGap(d, 4 * S, S);
+        QCOMPARE(d.markers[0].time, 2 * S);
+        QCOMPARE(d.markers[1].time, 6 * S);
+        QCOMPARE(d.markers[2].time, 10 * S);
+    }
+
     void closeGapsMakesTrackMagnetic()
     {
         ProjectData d = ProjectData::createDefault();
@@ -534,6 +554,123 @@ private slots:
         QCOMPARE(motionAt(Motion::ZoomIn, 1).zoom, 1.0 + kMotionAmount);
         QVERIFY(motionAt(Motion::PanLeft, 0).dx > 0 && motionAt(Motion::PanLeft, 1).dx < 0);
         QCOMPARE(fitSize(QSize(1000, 1000), QSize(1920, 1080)), QSize(1080, 1080));
+    }
+
+
+    // ---- 50-feature pack: editing ------------------------------------------
+    void rippleTrimClosesGap()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 20 * S);
+        const QUuid a = timeline::placeMedia(d, m, 0, 0, 0, 6 * S);
+        const QUuid b = timeline::placeMedia(d, m, 0, 6 * S, 0, 4 * S);
+        QVERIFY(timeline::rippleTrim(d, a, 2 * S, true)); // Q: trim head to 2 s
+        QCOMPARE(d.clipById(a)->start, 0);
+        QCOMPARE(d.clipById(a)->in, 2 * S);
+        QCOMPARE(d.clipById(b)->start, 4 * S);           // pulled left
+        QCOMPARE(d.tracks[2].clips[1].start, 4 * S);      // linked audio too
+        QVERIFY(timeline::rippleTrim(d, a, 3 * S, false)); // W: trim tail to 3 s
+        QCOMPARE(d.clipById(a)->end(), 3 * S);
+        QCOMPARE(d.clipById(b)->start, 3 * S);
+        checkInvariants(d);
+    }
+
+    void editPointsLiftNudge()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 20 * S, false);
+        timeline::placeMedia(d, m, 0, 0, 0, 3 * S);
+        const QUuid b = timeline::placeMedia(d, m, 0, 5 * S, 0, 2 * S);
+        QCOMPARE(timeline::nextEditPoint(d, 0), 3 * S);
+        QCOMPARE(timeline::nextEditPoint(d, 3 * S), 5 * S);
+        QCOMPARE(timeline::previousEditPoint(d, 6 * S), 5 * S);
+        QCOMPARE(timeline::nextEditPoint(d, 7 * S), -1);
+        timeline::liftRange(d, S, 2 * S);
+        QCOMPARE(d.tracks[0].clips.size(), 3);            // gap left behind
+        QCOMPARE(d.duration(), 7 * S);
+        QCOMPARE(timeline::nudgeClips(d, {b}, kUsPerSecond / 30), 1);
+        QCOMPARE(d.clipById(b)->start, 5 * S + kUsPerSecond / 30);
+        checkInvariants(d);
+    }
+
+    void rangeProjectAndDisabledClips()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 20 * S);
+        const QUuid a = timeline::placeMedia(d, m, 0, 0, 0, 10 * S);
+        timeline::toggleMarker(d, 6 * S, 0, "M");
+        const ProjectData r = timeline::rangeProject(d, 4 * S, 8 * S);
+        QCOMPARE(r.duration(), 4 * S);
+        QCOMPARE(r.tracks[0].clips[0].in, 4 * S);
+        QCOMPARE(r.markers[0].time, 2 * S);
+        d.clipById(a)->enabled = false;
+        const ProjectData e = timeline::withoutDisabledClips(d);
+        QCOMPARE(e.tracks[0].clips.size(), 0);
+        QCOMPARE(e.tracks[2].clips.size(), 1); // linked audio stays (only video was disabled)
+    }
+
+    void replaceAndPasteAttributes()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m1 = addVideo(d, 20 * S);
+        const QUuid m2 = addVideo(d, 3 * S, false);
+        const QUuid a = timeline::placeMedia(d, m1, 0, 0, 2 * S, 8 * S);
+        Clip src;
+        src.color.saturation = 0.3;
+        src.transform.scale = 0.5;
+        src.fx.grain = 0.4;
+        src.gain = 0.5;
+        src.fadeIn = S;
+        QCOMPARE(timeline::pasteAttributes(d, {a}, src, timeline::AttributeSet()), 1);
+        QCOMPARE(d.clipById(a)->color.saturation, 0.3);
+        QCOMPARE(d.clipById(a)->fx.grain, 0.4);
+        QCOMPARE(d.clipById(a)->transform.scale, 0.5);
+        // Replace with shorter, silent media: length clamps, the audio partner goes.
+        QVERIFY(timeline::replaceClipMedia(d, a, m2));
+        QCOMPARE(d.clipById(a)->mediaId, m2);
+        QCOMPARE(d.clipById(a)->in, 0);
+        QCOMPARE(d.clipById(a)->duration(), 3 * S);
+        QCOMPARE(d.clipById(a)->color.saturation, 0.3); // effects kept
+        QCOMPARE(d.tracks[2].clips.size(), 0);
+        QCOMPARE(timeline::applyQuickFades(d, {a}, 2 * S), 1);
+        QCOMPARE(d.clipById(a)->fadeIn, 1500 * kUsPerMs); // at most half the clip
+    }
+
+    void youtubeChaptersAndCollect()
+    {
+        ProjectData d = ProjectData::createDefault();
+        timeline::toggleMarker(d, 65 * S, 0, "Setup");
+        timeline::toggleMarker(d, 3725 * S, 0, "Finale");
+        QStringList warnings;
+        const QString text = timeline::youtubeChapters(d, &warnings);
+        QCOMPARE(text, QStringLiteral("0:00 Intro\n1:05 Setup\n1:02:05 Finale"));
+        QVERIFY(warnings.isEmpty());
+        ProjectData e = ProjectData::createDefault();
+        timeline::toggleMarker(e, 0, 0, "Start");
+        timeline::toggleMarker(e, 5 * S, 0, "");
+        warnings.clear();
+        QCOMPARE(timeline::youtubeChapters(e, &warnings), QStringLiteral("0:00 Start\n0:05 Marker 2"));
+        QCOMPARE(warnings.size(), 2); // too short + too few
+
+        QTemporaryDir tmp;
+        auto touch = [&](const QString &rel) {
+            const QString p = tmp.path() + rel;
+            QDir().mkpath(QFileInfo(p).absolutePath());
+            QFile f(p);
+            f.open(QIODevice::WriteOnly);
+            f.write("x");
+            return p;
+        };
+        ProjectData c = ProjectData::createDefault();
+        const QUuid m1 = addVideo(c, S, false, touch("/a/clip.mp4"));
+        addVideo(c, S, false, touch("/b/clip.mp4"));
+        addVideo(c, S, false, tmp.path() + "/missing.mp4");
+        timeline::placeMedia(c, m1, 0, 0);
+        const auto plan = timeline::collectPlan(c, tmp.path() + "/collected");
+        QCOMPARE(plan.size(), 2);
+        QVERIFY(plan[0].to.endsWith("/clip.mp4"));
+        QVERIFY(plan[1].to.endsWith("/clip (2).mp4"));
+        QCOMPARE(timeline::unusedMedia(c).size(), 2);
     }
 
     void timecode()

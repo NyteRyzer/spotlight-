@@ -1,5 +1,6 @@
 #include "core/timelineops.h"
 
+#include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QHash>
@@ -673,6 +674,11 @@ void insertGap(ProjectData &d, TimeUs at, TimeUs duration)
                 c.start += duration;
         }
     }
+    // Markers belong to the moments after the insert point: keep them there.
+    for (auto &m : d.markers) {
+        if (m.time >= at)
+            m.time += duration;
+    }
 }
 
 QUuid insertMedia(ProjectData &d, const QUuid &mediaId, int trackIndex, TimeUs at, TimeUs in, TimeUs out)
@@ -708,6 +714,19 @@ void rippleDeleteRange(ProjectData &d, TimeUs from, TimeUs to)
                 c.start -= len;
         }
     }
+    // Markers inside the removed range move to the cut; later ones follow
+    // their material left.
+    for (auto &m : d.markers) {
+        if (m.time >= to)
+            m.time -= len;
+        else if (m.time > from)
+            m.time = from;
+    }
+    // Two markers can now share a time: keep one.
+    std::sort(d.markers.begin(), d.markers.end(), [](const Marker &a, const Marker &b) { return a.time < b.time; });
+    d.markers.erase(std::unique(d.markers.begin(), d.markers.end(),
+                                [](const Marker &a, const Marker &b) { return a.time == b.time; }),
+                    d.markers.end());
 }
 
 TimeUs rippleDeleteRanges(ProjectData &d, QVector<QPair<TimeUs, TimeUs>> ranges)
@@ -908,6 +927,282 @@ double videoAlpha(const Track &t, const Clip &c, TimeUs at)
             f.fadeOut = 0;
     }
     return fadeEnvelope(f, at);
+}
+
+// ---- More editing ------------------------------------------------------
+
+ProjectData withoutDisabledClips(const ProjectData &d)
+{
+    ProjectData out = d;
+    for (auto &t : out.tracks) {
+        t.clips.erase(std::remove_if(t.clips.begin(), t.clips.end(), [](const Clip &c) { return !c.enabled; }),
+                      t.clips.end());
+    }
+    return out;
+}
+
+bool rippleTrim(ProjectData &d, const QUuid &clipId, TimeUs at, bool head)
+{
+    const Clip *primary = d.clipById(clipId);
+    if (!primary || !primary->contains(at))
+        return false;
+    const TimeUs removed = head ? at - primary->start : primary->end() - at;
+    if (removed <= 0 || primary->duration() - removed < kMinClipDuration)
+        return false;
+    for (const auto &id : groupOf(d, clipId)) {
+        int ti = -1;
+        Clip *c = d.clipById(id, &ti);
+        if (!c || d.tracks[ti].locked)
+            continue;
+        const TimeUs boundary = c->end();
+        const QUuid cid = c->id;
+        if (head) {
+            if (!isStillClip(d, *c))
+                c->in += c->toSource(removed);
+            else
+                c->out -= removed;
+            c->fadeIn = std::min(c->fadeIn, c->duration());
+        } else {
+            c->out -= c->toSource(removed);
+            c->fadeOut = std::min(c->fadeOut, c->duration());
+        }
+        // Close the gap: everything after the clip on its track moves left.
+        for (auto &o : d.tracks[ti].clips) {
+            if (o.id != cid && o.start >= boundary)
+                o.start -= removed;
+        }
+    }
+    return true;
+}
+
+namespace {
+QVector<TimeUs> editPoints(const ProjectData &d)
+{
+    QVector<TimeUs> pts{0};
+    for (const auto &t : d.tracks) {
+        for (const auto &c : t.clips) {
+            pts << c.start << c.end();
+        }
+    }
+    std::sort(pts.begin(), pts.end());
+    pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+    return pts;
+}
+} // namespace
+
+TimeUs nextEditPoint(const ProjectData &d, TimeUs t)
+{
+    for (TimeUs p : editPoints(d)) {
+        if (p > t + kUsPerMs)
+            return p;
+    }
+    return -1;
+}
+
+TimeUs previousEditPoint(const ProjectData &d, TimeUs t)
+{
+    const QVector<TimeUs> pts = editPoints(d);
+    for (int i = pts.size() - 1; i >= 0; --i) {
+        if (pts[i] < t - kUsPerMs)
+            return pts[i];
+    }
+    return -1;
+}
+
+void liftRange(ProjectData &d, TimeUs from, TimeUs to)
+{
+    for (auto &t : d.tracks) {
+        if (!t.locked)
+            clearRange(t, from, to);
+    }
+}
+
+int nudgeClips(ProjectData &d, const QVector<QUuid> &clipIds, TimeUs delta)
+{
+    // One move per linked group (moving a primary moves its partners).
+    QSet<QUuid> done;
+    int moved = 0;
+    for (const auto &id : clipIds) {
+        if (done.contains(id))
+            continue;
+        for (const auto &g : groupOf(d, id))
+            done.insert(g);
+        int ti = -1;
+        const Clip *c = d.clipById(id, &ti);
+        if (c && moveClip(d, id, c->start + delta, ti))
+            ++moved;
+    }
+    return moved;
+}
+
+ProjectData rangeProject(const ProjectData &d, TimeUs from, TimeUs to)
+{
+    ProjectData r = d;
+    for (auto &t : r.tracks)
+        t.locked = false;
+    const TimeUs end = r.duration();
+    if (to < end)
+        rippleDeleteRange(r, to, end);
+    if (from > 0)
+        rippleDeleteRange(r, 0, from);
+    r.inPoint = r.outPoint = -1;
+    return r;
+}
+
+bool replaceClipMedia(ProjectData &d, const QUuid &clipId, const QUuid &mediaId)
+{
+    const MediaItem *mp = d.mediaById(mediaId);
+    if (!mp || !d.clipById(clipId))
+        return false;
+    const MediaItem m = *mp;
+    bool changed = false;
+    QVector<QUuid> drop;
+    for (const auto &id : groupOf(d, clipId)) {
+        int ti = -1;
+        Clip *c = d.clipById(id, &ti);
+        if (!c || d.tracks[ti].locked)
+            continue;
+        const bool fits = d.tracks[ti].isVideo() ? (m.hasVideo || m.isStill()) : m.hasAudio;
+        if (!fits) {
+            drop << id;
+            continue;
+        }
+        const TimeUs len = c->duration();
+        c->mediaId = mediaId;
+        c->in = 0;
+        if (m.isStill()) {
+            c->speed = 1.0;
+            c->out = len;
+        } else {
+            c->out = std::min(m.duration, c->toSource(len));
+        }
+        changed = true;
+    }
+    for (const auto &id : drop) {
+        int ti = -1;
+        if (d.clipById(id, &ti)) {
+            auto &clips = d.tracks[ti].clips;
+            clips.erase(std::remove_if(clips.begin(), clips.end(), [&](const Clip &x) { return x.id == id; }),
+                        clips.end());
+        }
+    }
+    return changed;
+}
+
+int pasteAttributes(ProjectData &d, const QVector<QUuid> &clipIds, const Clip &src, const AttributeSet &what)
+{
+    int n = 0;
+    for (const auto &id : clipIds) {
+        int ti = -1;
+        Clip *c = d.clipById(id, &ti);
+        if (!c || c->id == src.id || d.tracks[ti].locked)
+            continue;
+        const bool video = d.tracks[ti].isVideo();
+        if (video && what.color)
+            c->color = src.color;
+        if (video && what.transform) {
+            c->transform = src.transform;
+            c->motion = src.motion;
+        }
+        if (video && what.effects) {
+            c->fx = src.fx;
+            c->key = src.key;
+            c->stabilize = src.stabilize;
+        }
+        if (what.audio) {
+            c->gain = src.gain;
+            c->fadeIn = std::min(src.fadeIn, c->duration());
+            c->fadeOut = std::min(src.fadeOut, c->duration() - c->fadeIn);
+        }
+        ++n;
+    }
+    if (what.speed) {
+        for (const auto &id : clipIds) {
+            if (id != src.id)
+                setClipSpeed(d, id, src.speed);
+        }
+    }
+    return n;
+}
+
+int applyQuickFades(ProjectData &d, const QVector<QUuid> &clipIds, TimeUs length)
+{
+    int n = 0;
+    for (const auto &id : clipIds) {
+        int ti = -1;
+        Clip *c = d.clipById(id, &ti);
+        if (!c || d.tracks[ti].locked)
+            continue;
+        const TimeUs f = std::min(length, c->duration() / 2);
+        c->fadeIn = c->fadeOut = f;
+        ++n;
+    }
+    return n;
+}
+
+QString youtubeChapters(const ProjectData &d, QStringList *warnings)
+{
+    auto stamp = [](TimeUs t) {
+        const qint64 s = t / kUsPerSecond;
+        return s >= 3600 ? QStringLiteral("%1:%2:%3")
+                               .arg(s / 3600)
+                               .arg(s / 60 % 60, 2, 10, QLatin1Char('0'))
+                               .arg(s % 60, 2, 10, QLatin1Char('0'))
+                         : QStringLiteral("%1:%2").arg(s / 60).arg(s % 60, 2, 10, QLatin1Char('0'));
+    };
+    QVector<Marker> ms = d.markers;
+    std::sort(ms.begin(), ms.end(), [](const Marker &a, const Marker &b) { return a.time < b.time; });
+    // Chapters start on whole seconds; YouTube needs one at 0:00.
+    if (ms.isEmpty() || ms.first().time >= kUsPerSecond)
+        ms.prepend({QUuid(), 0, QStringLiteral("Intro")});
+    QStringList lines;
+    int n = 0;
+    for (int i = 0; i < ms.size(); ++i) {
+        const QString name = ms[i].name.trimmed().isEmpty() ? QStringLiteral("Chapter %1").arg(i + 1) : ms[i].name.trimmed();
+        lines << QStringLiteral("%1 %2").arg(stamp(i == 0 ? 0 : ms[i].time), name);
+        ++n;
+        if (warnings && i + 1 < ms.size() && ms[i + 1].time - ms[i].time < 10 * kUsPerSecond)
+            warnings->append(QStringLiteral("“%1” is shorter than 10 seconds.").arg(name));
+    }
+    if (warnings && n < 3)
+        warnings->append(QStringLiteral("YouTube needs at least 3 chapters (add markers with M)."));
+    return lines.join(QLatin1Char('\n'));
+}
+
+QVector<CopyPlan> collectPlan(const ProjectData &d, const QString &folder)
+{
+    QVector<CopyPlan> plan;
+    QSet<QString> names;
+    const QDir dir(folder);
+    for (const auto &m : d.media) {
+        if (m.isTitle() || !QFileInfo::exists(m.path))
+            continue;
+        const QFileInfo fi(m.path);
+        if (QFileInfo(dir.absolutePath()) == QFileInfo(fi.absolutePath()))
+            continue; // already collected
+        QString name = fi.fileName();
+        for (int n = 2; names.contains(name.toLower()) || (QFileInfo::exists(dir.filePath(name))
+                                                          && QFileInfo(dir.filePath(name)).size() != fi.size());
+             ++n)
+            name = QStringLiteral("%1 (%2).%3").arg(fi.completeBaseName()).arg(n).arg(fi.suffix());
+        names.insert(name.toLower());
+        plan.append({m.id, m.path, dir.filePath(name)});
+    }
+    return plan;
+}
+
+QVector<QUuid> unusedMedia(const ProjectData &d)
+{
+    QSet<QUuid> used;
+    for (const auto &t : d.tracks)
+        for (const auto &c : t.clips)
+            used.insert(c.mediaId);
+    QVector<QUuid> out;
+    for (const auto &m : d.media) {
+        if (!used.contains(m.id))
+            out.append(m.id);
+    }
+    return out;
 }
 
 } // namespace spotlight::timeline
