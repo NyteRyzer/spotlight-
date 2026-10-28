@@ -122,6 +122,42 @@ private slots:
         view.setTracks({base});
         const QColor g = view.currentFrame().pixel(40, 90);
         QVERIFY(std::abs(g.red() - g.green()) < 3 && std::abs(g.green() - g.blue()) < 3);
+
+        // Effects: invert + cinema bars.
+        ViewTrack fxT;
+        fxT.layer.still = red;
+        fxT.layer.clip.fx.invert = true;
+        fxT.layer.clip.fx.cinemaBars = true;
+        view.setTracks({fxT});
+        f = view.currentFrame();
+        const QColor inv = f.pixel(160, 90);
+        QVERIFY2(inv.red() < 20 && inv.green() > 235 && inv.blue() > 235, qPrintable(inv.name()));
+        QCOMPARE(QColor(f.pixel(160, 3)), QColor(Qt::black));
+
+        // Blur fill behind a half-size picture, with a border.
+        ViewTrack bf;
+        bf.layer.still = blue;
+        bf.layer.clip.transform.scale = 0.5;
+        bf.layer.clip.fx.blurFill = true;
+        bf.layer.clip.fx.border = 0.05;
+        bf.layer.clip.fx.borderColor = Qt::white;
+        view.setTracks({bf});
+        f = view.currentFrame();
+        const QColor bgc = f.pixel(10, 10);
+        QVERIFY2(bgc.blue() > 150 && bgc.red() < 40, qPrintable(bgc.name())); // darkened blue, not black
+        const QColor edge = f.pixel(160, 45 - 4); // just above the picture: border
+        QVERIFY2(edge.red() > 240 && edge.green() > 240, qPrintable(edge.name()));
+
+        // Slide-in from the left starts off-screen and settles in place.
+        ViewTrack sl;
+        sl.layer.still = blue;
+        sl.layer.clip.motion = Motion::SlideInLeft;
+        sl.layer.elapsed = 0.0;
+        view.setTracks({sl});
+        QCOMPARE(QColor(view.currentFrame().pixel(160, 90)), QColor(Qt::black));
+        sl.layer.elapsed = 2.0;
+        view.setTracks({sl});
+        QCOMPARE(QColor(view.currentFrame().pixel(160, 90)), QColor(Qt::blue));
     }
 
     void designEffectsRender()

@@ -198,6 +198,73 @@ QImage invertImage(const QImage &src)
     return img;
 }
 
+QImage applyGamma(const QImage &src, double gamma)
+{
+    if (src.isNull() || qFuzzyCompare(gamma, 1.0))
+        return src;
+    QImage img = argb(src);
+    std::array<int, 256> lut{};
+    const double inv = 1.0 / std::clamp(gamma, 0.1, 10.0);
+    for (int i = 0; i < 256; ++i)
+        lut[i] = std::clamp(int(std::pow(i / 255.0, inv) * 255.0 + 0.5), 0, 255);
+    for (int y = 0; y < img.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x)
+            line[x] = qRgba(lut[qRed(line[x])], lut[qGreen(line[x])], lut[qBlue(line[x])], qAlpha(line[x]));
+    }
+    return img;
+}
+
+QImage sharpenImage(const QImage &src, double amount)
+{
+    if (src.isNull() || amount <= 0)
+        return src;
+    QImage img = argb(src);
+    const QImage soft = argb(blurImage(img, 1.2));
+    const int k = int(amount * 256.0);
+    for (int y = 0; y < img.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(img.scanLine(y));
+        const auto *bl = reinterpret_cast<const QRgb *>(soft.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            auto ch = [&](int v, int b) { return std::clamp(v + (((v - b) * k) >> 8), 0, 255); };
+            const QRgb p = line[x], b = bl[x];
+            line[x] = qRgba(ch(qRed(p), qRed(b)), ch(qGreen(p), qGreen(b)), ch(qBlue(p), qBlue(b)), qAlpha(p));
+        }
+    }
+    return img;
+}
+
+QImage pixelateImage(const QImage &src, int block)
+{
+    if (src.isNull() || block < 2)
+        return src;
+    const QImage small = src.scaled(std::max(1, src.width() / block), std::max(1, src.height() / block),
+                                    Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    return small.scaled(src.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation);
+}
+
+QImage addGrain(const QImage &src, double strength, quint32 seed)
+{
+    if (src.isNull() || strength <= 0)
+        return src;
+    QImage img = argb(src);
+    const int range = std::max(1, int(strength));
+    quint32 state = seed | 1u;
+    for (int y = 0; y < img.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            const int n = int(state % quint32(range + 1)) - range / 2;
+            const QRgb p = line[x];
+            line[x] = qRgba(std::clamp(qRed(p) + n, 0, 255), std::clamp(qGreen(p) + n, 0, 255),
+                            std::clamp(qBlue(p) + n, 0, 255), qAlpha(p));
+        }
+    }
+    return img;
+}
+
 QImage removeBackground(const QImage &src, double tolerance)
 {
     if (src.isNull())

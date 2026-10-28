@@ -30,6 +30,19 @@ QImage hueRotate(const QImage &src, double degrees);
 
 QImage invertImage(const QImage &src);
 
+// FFmpeg eq gamma: v' = v^(1/gamma) per channel.
+QImage applyGamma(const QImage &src, double gamma);
+
+// Unsharp mask: src + amount * (src - blur(src)), like FFmpeg unsharp.
+QImage sharpenImage(const QImage &src, double amount);
+
+// Mosaic with square blocks of `block` pixels (area down, nearest up).
+QImage pixelateImage(const QImage &src, int block);
+
+// Uniform per-pixel noise of +-strength/2 (FFmpeg noise alls), seeded so a
+// still frame doesn't shimmer in the preview.
+QImage addGrain(const QImage &src, double strength, quint32 seed);
+
 // "Remove background": flood-fills from the image border, turning connected
 // pixels within `tolerance` (0..1) of the border colours transparent, with a
 // soft one-pixel edge. Works best on solid or studio backdrops.

@@ -20,6 +20,7 @@ struct ViewLayer {
     QImage still;         // stills and titles
     Clip clip;            // look, transform, key, motion
     double progress = 0;  // 0..1 through the clip (Ken Burns motion)
+    double elapsed = 1e9; // seconds since the clip started (entrance motion)
     double alpha = 1.0;   // fade envelope
 };
 
@@ -86,6 +87,8 @@ private:
     // The layer's picture after flip, colour and key, at roughly `target`
     // pixels (cached for display).
     QImage processed(const ViewLayer &l, const QSize &target, bool cache) const;
+    // Blurred, darkened copy covering the canvas (clip "blur fill").
+    QImage blurFillBackground(const ViewLayer &l, const QSize &px, bool cache) const;
     void drawLayer(QPainter &p, const ViewLayer &l, const QSize &canvas, double scale, bool forDisplay) const;
     void drawTransition(QPainter &p, const ViewTrack &t, const QSize &canvas, double scale, bool forDisplay) const;
 

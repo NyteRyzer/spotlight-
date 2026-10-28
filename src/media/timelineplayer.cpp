@@ -252,6 +252,7 @@ bool TimelinePlayer::prepareLayer(ViewLayer &layer, Lane &lane, const Clip &clip
     layer.clip = clip;
     layer.slot = lane.slot;
     layer.progress = clip.duration() > 0 ? double(at - clip.start) / double(clip.duration()) : 0.0;
+    layer.elapsed = usToSeconds(at - clip.start);
     if (media->isStill()) {
         stopLane(lane);
         layer.still = stillImage(media->path);
@@ -283,7 +284,9 @@ void TimelinePlayer::syncVideo(bool forceSeek)
         const Track &track = d.tracks[videos[vi]];
         Lane &main = m_video[vi * 2];
         Lane &aux = m_video[vi * 2 + 1];
-        const int ci = track.muted ? -1 : timeline::clipIndexAt(track, m_pos);
+        int ci = track.muted ? -1 : timeline::clipIndexAt(track, m_pos);
+        if (ci >= 0 && !track.clips[ci].enabled)
+            ci = -1;
         if (ci < 0) {
             stopLane(main);
             stopLane(aux);
@@ -299,6 +302,8 @@ void TimelinePlayer::syncVideo(bool forceSeek)
         vt.layer.alpha = timeline::videoAlpha(track, clip, m_pos);
         const Transition tr = timeline::effectiveTransition(track, clip);
         const Clip *prev = tr.isNone() ? nullptr : timeline::previousAdjacent(track, clip);
+        if (prev && !prev->enabled)
+            prev = nullptr;
         if (prev && m_pos < clip.start + tr.duration && prepareLayer(vt.outgoing, aux, *prev, m_pos, forceSeek)) {
             vt.inTransition = true;
             vt.transition = tr.type;
@@ -331,7 +336,7 @@ void TimelinePlayer::syncAudio(bool forceSeek)
         const int ti = audioTracks[i];
         const Track &track = d.tracks[ti];
         const int ci = timeline::clipIndexAt(track, m_pos);
-        const Clip *clip = ci >= 0 ? &track.clips[ci] : nullptr;
+        const Clip *clip = ci >= 0 && track.clips[ci].enabled ? &track.clips[ci] : nullptr;
         const MediaItem *media = clip ? d.mediaById(clip->mediaId) : nullptr;
         if (!clip || !media || !media->hasAudio || !timeline::isTrackAudible(d, ti)) {
             stopLane(lane);

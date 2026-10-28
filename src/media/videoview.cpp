@@ -114,7 +114,7 @@ QImage VideoView::processed(const ViewLayer &l, const QSize &target, bool cache)
                   .arg(c.color.brightness)
                   .arg(c.color.contrast)
                   .arg(c.color.saturation)
-                  .arg(QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8")
+                  .arg(QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9")
                            .arg(c.color.temperature)
                            .arg(c.color.tint)
                            .arg(int(c.color.mono))
@@ -122,25 +122,78 @@ QImage VideoView::processed(const ViewLayer &l, const QSize &target, bool cache)
                            .arg(c.color.blur)
                            .arg(c.key.color.rgb())
                            .arg(c.key.similarity)
-                           .arg(c.key.blend));
+                           .arg(c.key.blend)
+                           .arg(QStringLiteral("%1,%2,%3,%4,%5,%6,%7")
+                                    .arg(c.color.hue)
+                                    .arg(c.color.gamma)
+                                    .arg(c.fx.sharpen)
+                                    .arg(c.fx.grain)
+                                    .arg(int(c.fx.invert) | int(c.fx.cinemaBars) << 1)
+                                    .arg(c.fx.pixelate)
+                                    .arg(target.height())));
         auto it = m_cache.constFind(id);
         if (it != m_cache.constEnd() && it->key == key)
             return it->image;
     }
 
-    // Same order as the exporter: fit, flip, eq, matrix, blur, vignette, key.
+    // Same order as the exporter: fit, flip, eq, matrix, blur, vignette,
+    // effects, key.
     QImage img = src.size() == target ? src : src.scaled(target, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     if (c.transform.flipH || c.transform.flipV)
         img = img.mirrored(c.transform.flipH, c.transform.flipV);
     img = adjustImage(img, c.color.brightness, c.color.contrast, c.color.saturation);
+    img = applyGamma(img, c.color.gamma);
     if (c.color.hasMatrix())
         img = applyColorMatrix(img, colorMatrix(c.color));
     if (c.color.blur > 0)
         img = blurImage(img, blurSigma(c.color.blur, img.height()));
     if (c.color.vignette > 0)
         img = applyVignette(img, vignetteAngle(c.color.vignette));
+    const ClipFx &fx = c.fx;
+    if (fx.invert)
+        img = invertImage(img);
+    if (fx.sharpen > 0)
+        img = sharpenImage(img, sharpenAmount(fx.sharpen));
+    if (fx.pixelate > 0)
+        img = pixelateImage(img, pixelBlock(fx.pixelate, img.height()));
+    if (fx.grain > 0)
+        img = addGrain(img, grainStrength(fx.grain), quint32(l.still.isNull() ? m_serial.value(l.slot) : 1) * 2654435761u);
+    if (fx.cinemaBars) {
+        const int bar = cinemaBarHeight(img.size());
+        if (bar > 0) {
+            img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            QPainter bp(&img);
+            bp.fillRect(0, 0, img.width(), bar, Qt::black);
+            bp.fillRect(0, img.height() - bar, img.width(), bar, Qt::black);
+        }
+    }
     if (c.key.enabled)
         img = chromaKey(img, c.key.color, c.key.similarity, c.key.blend);
+    if (cache)
+        m_cache.insert(id, {key, img});
+    return img;
+}
+
+QImage VideoView::blurFillBackground(const ViewLayer &l, const QSize &px, bool cache) const
+{
+    const QImage src = frameFor(l);
+    if (src.isNull() || px.isEmpty())
+        return {};
+    const QString id = QStringLiteral("bf") +
+                       (l.still.isNull() ? QStringLiteral("s%1").arg(l.slot) : QStringLiteral("i%1").arg(l.still.cacheKey()));
+    const QString key = QStringLiteral("%1|%2x%3").arg(l.still.isNull() ? m_serial.value(l.slot) : 0).arg(px.width()).arg(px.height());
+    if (cache) {
+        auto it = m_cache.constFind(id);
+        if (it != m_cache.constEnd() && it->key == key)
+            return it->image;
+    }
+    // Blur at a reduced size: it's soft anyway and this keeps playback fast.
+    const QSize work = cache ? px / 2 : px;
+    QImage img = src.scaled(work.expandedTo(QSize(2, 2)), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    img = img.copy((img.width() - work.width()) / 2, (img.height() - work.height()) / 2, work.width(), work.height());
+    img = blurImage(img, blurFillSigma(m_canvas.isEmpty() ? px.height() : m_canvas.height()) * work.height() /
+                             std::max(1, m_canvas.isEmpty() ? px.height() : m_canvas.height()));
+    img = adjustImage(img, -0.08, 1.0, 1.0);
     if (cache)
         m_cache.insert(id, {key, img});
     return img;
@@ -172,13 +225,21 @@ void VideoView::drawLayer(QPainter &p, const ViewLayer &l, const QSize &canvas, 
     if (ct + cb > 0.95)
         cb = 0.95 - ct;
     const double s = std::clamp(tf.scale, 0.05, 5.0);
-    const MotionState mo = motionAt(c.motion, l.progress);
+    const MotionState mo = motionAt(c.motion, l.progress, l.elapsed);
     const double rad = tf.rotation * M_PI / 180.0;
     const double ox0 = (cl - cr) / 2.0 * fit.width() * s;
     const double oy0 = (ct - cb) / 2.0 * fit.height() * s;
-    const double ox = ox0 * std::cos(rad) - oy0 * std::sin(rad) + tf.x * W + mo.dx * fit.width() * s;
-    const double oy = ox0 * std::sin(rad) + oy0 * std::cos(rad) + tf.y * H + mo.dy * fit.height() * s;
+    const double ox = ox0 * std::cos(rad) - oy0 * std::sin(rad) + tf.x * W + mo.dx * fit.width() * s + mo.fx * W;
+    const double oy = ox0 * std::sin(rad) + oy0 * std::cos(rad) + tf.y * H + mo.dy * fit.height() * s + mo.fy * H;
     const double pw = fit.width() * (1 - cl - cr), ph = fit.height() * (1 - ct - cb);
+
+    if (c.fx.blurFill) {
+        // Like the export, the background isn't faded or made transparent.
+        const QSize px(std::max(2, int(std::ceil(W * scale))), std::max(2, int(std::ceil(H * scale))));
+        const QImage bg = blurFillBackground(l, px, forDisplay);
+        if (!bg.isNull())
+            p.drawImage(QRectF(0, 0, W * scale, H * scale), bg);
+    }
 
     p.save();
     p.setRenderHint(QPainter::SmoothPixmapTransform);
@@ -189,6 +250,10 @@ void VideoView::drawLayer(QPainter &p, const ViewLayer &l, const QSize &canvas, 
     p.scale(s * mo.zoom, s * mo.zoom);
     const double kx = double(img.width()) / fit.width(), ky = double(img.height()) / fit.height();
     const QRectF srcRect(cl * fit.width() * kx, ct * fit.height() * ky, pw * kx, ph * ky);
+    if (c.fx.border > 0) {
+        const double b = borderPixels(c.fx.border, int(H));
+        p.fillRect(QRectF(-pw / 2 - b, -ph / 2 - b, pw + 2 * b, ph + 2 * b), c.fx.borderColor);
+    }
     p.drawImage(QRectF(-pw / 2, -ph / 2, pw, ph), img, srcRect);
     p.restore();
 }
