@@ -29,6 +29,11 @@ public:
     void render(QPainter &p, const DesignDocument &doc);
     QImage renderToImage(const DesignDocument &doc);
 
+    // Smart resize: changes the canvas size and refits the layout. Layers
+    // that cover (nearly) the whole canvas are scaled to cover the new one;
+    // everything else is scaled uniformly to fit and stays centred.
+    void resizeDocument(DesignDocument &doc, const QSize &size);
+
     // Topmost visible layer at a canvas position, or a null id.
     QUuid layerAt(const DesignDocument &doc, const QPointF &canvasPos);
 

@@ -74,6 +74,11 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     tb->addWidget(m_preset);
     m_bgButton->setToolTip(tr("Background color"));
     tb->addWidget(m_bgButton);
+    m_scaleLayout = tb->addAction(tr("Scale Layout"));
+    m_scaleLayout->setCheckable(true);
+    m_scaleLayout->setChecked(true);
+    m_scaleLayout->setToolTip(tr("Smart resize: refit the layers when the canvas size changes "
+                                 "(e.g. thumbnail → Shorts cover)"));
     tb->addSeparator();
     tb->addAction(tr("T  Text"), this, &DesignStudio::addText);
     tb->addAction(tr("Image…"), this, &DesignStudio::addImageDialog);
@@ -107,6 +112,11 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     tb->addAction(QStringLiteral("▼"), this, [this] { moveSelected(-1); })->setToolTip(tr("Send backward"));
     tb->addAction(tr("Delete"), this, &DesignStudio::deleteSelected);
     tb->addSeparator();
+    tb->addAction(QStringLiteral("−"), m_canvas, &DesignCanvas::zoomOut)->setToolTip(tr("Zoom out (Ctrl+wheel)"));
+    tb->addAction(tr("Fit"), m_canvas, &DesignCanvas::zoomToFit)->setToolTip(tr("Fit the canvas in the window"));
+    tb->addAction(QStringLiteral("+"), m_canvas, &DesignCanvas::zoomIn)
+        ->setToolTip(tr("Zoom in (Ctrl+wheel; scroll or Space+drag to pan; arrows nudge, Alt-drag skips snapping)"));
+    tb->addSeparator();
     tb->addAction(tr("To Timeline"), this, &DesignStudio::placeOnTimelineRequested)
         ->setToolTip(tr("Place this graphic on the top video track at the playhead (intro, end card, overlay)"));
     auto *exportAct = tb->addAction(tr("Export Image…"), this, &DesignStudio::exportImage);
@@ -137,7 +147,14 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
                 return;
             size = QSize(w->value(), h->value());
         }
-        m_project->edit(tr("Canvas Size"), [&](ProjectData &d) { d.design.canvasSize = size; });
+        const bool smart = m_scaleLayout->isChecked();
+        m_project->edit(tr("Canvas Size"), [&](ProjectData &d) {
+            if (smart)
+                m_canvas->renderer()->resizeDocument(d.design, size);
+            else
+                d.design.canvasSize = size;
+        });
+        m_canvas->zoomToFit();
     });
     connect(m_bgButton, &QPushButton::clicked, this, [this] {
         const QColor c = QColorDialog::getColor(m_project->data().design.background, this, tr("Background"));
@@ -274,6 +291,13 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
     m_layerRefreshers << [fadeDir](const DesignLayer &l) { fadeDir->setCurrentIndex(std::clamp(l.fadeDirection, 0, 3)); };
     bindSlider(imgForm, tr("Fade amount"), 0, 100, 0.01, [](const DesignLayer &l) { return l.fadeAmount; },
                [](DesignLayer &l, double v) { l.fadeAmount = v; });
+    bindCheck(imgForm, tr("Color tint (duotone)"), [](const DesignLayer &l) { return l.tint; },
+              [](DesignLayer &l, bool v) { l.tint = v; })
+        ->setToolTip(tr("Recolor the photo in one color — great behind bold text"));
+    imgForm->addRow(tr("Tint color"), colorButton(QStringLiteral("tintColor"), [](const DesignLayer &l) { return l.tintColor; },
+                                                  [](DesignLayer &l, const QColor &c) { l.tintColor = c; }));
+    bindSlider(imgForm, tr("Tint amount"), 0, 100, 0.01, [](const DesignLayer &l) { return l.tintAmount; },
+               [](DesignLayer &l, double v) { l.tintAmount = v; });
     m_typePages->addWidget(imgPage);
     // Text page
     auto *textPage = new QWidget(m_typePages);
@@ -298,6 +322,13 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
                      colorButton(QStringLiteral("outlineColor"), [](const DesignLayer &l) { return l.outlineColor; },
                                  [](DesignLayer &l, const QColor &c) { l.outlineColor = c; }));
     textForm->addRow(QString(), m_shadow);
+    bindCheck(textForm, tr("Gradient fill"), [](const DesignLayer &l) { return l.textGradient; },
+              [](DesignLayer &l, bool v) { l.textGradient = v; });
+    textForm->addRow(tr("Second color"),
+                     colorButton(QStringLiteral("textColor2"), [](const DesignLayer &l) { return l.textColor2; },
+                                 [](DesignLayer &l, const QColor &c) { l.textColor2 = c; }));
+    bindSlider(textForm, tr("Gradient angle"), -180, 180, 1, [](const DesignLayer &l) { return l.textGradientAngle; },
+               [](DesignLayer &l, double v) { l.textGradientAngle = v; });
     bindCheck(textForm, tr("Italic"), [](const DesignLayer &l) { return l.italic; },
               [](DesignLayer &l, bool v) { l.italic = v; });
     auto *textAlign = new QComboBox(textPage);
@@ -811,7 +842,8 @@ void DesignStudio::exportImage()
 
 QStringList DesignStudio::templateNames()
 {
-    return {tr("Bold Reaction"), tr("Tutorial / How-To"), tr("Podcast Episode"), tr("Versus / Comparison")};
+    return {tr("Bold Reaction"), tr("Tutorial / How-To"), tr("Podcast Episode"), tr("Versus / Comparison"),
+            tr("Gaming"),        tr("Vlog"),              tr("Before / After"),  tr("Top 10 List")};
 }
 
 bool DesignStudio::copySelectedLayer(DesignLayer *out) const
@@ -972,6 +1004,44 @@ void DesignStudio::applyTemplate(int index)
         text(tr("EPISODE 42"), 120, white, QColor(40, 10, 70), 60 * k, H * 0.30, 0);
         text(tr("with a very special guest"), 46, gold, QColor(40, 10, 70), 64 * k, H * 0.58, 0);
         break;
+    case 4: // Gaming: neon diagonal slash, burst, stacked glowing title.
+        shape(tr("Dark"), QRectF(0, 0, W, H), QColor(10, 0, 30, 0), QColor(10, 0, 30, 230), 0);
+        shape(tr("Slash"), QRectF(W * 0.42, -H * 0.1, 90 * k, H * 1.2), QColor(0, 255, 200), QColor(160, 0, 255), 90);
+        layers.last().rotation = 18;
+        shape(tr("Burst"), QRectF(W - 260 * k, H - 250 * k, 220 * k, 220 * k), QColor(255, 220, 0), QColor(255, 90, 0),
+              90, 0, ShapeKind::Burst);
+        text(tr("EPIC\nWIN"), 150, white, QColor(160, 0, 255), 48 * k, H * 0.12, 0);
+        layers.last().glow = true;
+        layers.last().glowColor = QColor(0, 255, 200);
+        layers.last().glowSize = 24 * k;
+        text(tr("100%"), 54, black, black, W - 150 * k, H - 172 * k, 1, false, 0);
+        break;
+    case 5: // Vlog: clean bottom bar, handwritten-style caption, location pill.
+        shape(tr("Bar"), QRectF(0, H * 0.70, W, H * 0.30), QColor(0, 0, 0, 0), QColor(0, 0, 0, 200), 90);
+        text(tr("A DAY IN TOKYO"), 96, white, black, 48 * k, H * 0.72, 0, true, 0);
+        shape(tr("Location"), QRectF(48 * k, 40 * k, 250 * k, 58 * k), QColor(255, 255, 255, 235),
+              QColor(255, 255, 255, 235), 0, 29 * k);
+        text(tr("📍 JAPAN"), 34, QColor(20, 20, 24), QColor(20, 20, 24), 48 * k + 125 * k, 46 * k, 1, false, 0);
+        break;
+    case 6: // Before / After: two labelled halves with a divider and arrow.
+        shape(tr("Divider"), QRectF(W / 2 - 6 * k, 0, 12 * k, H), white, white, 0);
+        shape(tr("Before tag"), QRectF(36 * k, H - 120 * k, 260 * k, 80 * k), QColor(30, 30, 36, 230),
+              QColor(30, 30, 36, 230), 0, 12 * k);
+        text(tr("BEFORE"), 52, white, black, 36 * k + 130 * k, H - 106 * k, 1, false, 0);
+        shape(tr("After tag"), QRectF(W - 296 * k, H - 120 * k, 260 * k, 80 * k), gold, gold, 0, 12 * k);
+        text(tr("AFTER"), 52, QColor(20, 20, 24), QColor(20, 20, 24), W - 296 * k + 130 * k, H - 106 * k, 1, false, 0);
+        shape(tr("Arrow"), QRectF(W / 2 - 80 * k, H / 2 - 50 * k, 160 * k, 100 * k), gold, QColor(255, 140, 0), 0, 0,
+              ShapeKind::Arrow);
+        break;
+    case 7: // Top 10: giant number, list headline, speech bubble teaser.
+        shape(tr("Wash"), QRectF(0, 0, W, H), QColor(230, 30, 60, 210), QColor(120, 0, 160, 210), 135);
+        text(QStringLiteral("10"), 360, gold, black, 40 * k, H * 0.02, 0);
+        text(tr("THINGS YOU\nMISSED"), 92, white, black, W * 0.45, H * 0.20, 0);
+        shape(tr("Bubble"), QRectF(W * 0.50, H * 0.64, 380 * k, 150 * k), white, white, 0, 0, ShapeKind::SpeechBubble);
+        text(tr("#3 is wild"), 48, QColor(20, 20, 24), QColor(20, 20, 24), W * 0.50 + 190 * k, H * 0.64 + 34 * k, 1,
+             false, 0);
+        break;
+    case 3:
     default: // Versus: split screen with a central VS badge.
         shape(tr("Left"), QRectF(0, 0, W / 2, H), QColor(30, 120, 255, 120), QColor(30, 120, 255, 30), 0);
         shape(tr("Right"), QRectF(W / 2, 0, W / 2, H), QColor(255, 50, 70, 30), QColor(255, 50, 70, 120), 0);

@@ -77,6 +77,7 @@ private:
     QListWidget *m_layers;
     QComboBox *m_preset;
     QPushButton *m_bgButton;
+    QAction *m_scaleLayout = nullptr; // smart resize when the canvas size changes
 
     // Properties
     QWidget *m_props;

@@ -4,6 +4,7 @@
 #include "core/timelineops.h"
 #include "media/timelineplayer.h"
 #include "ui/inspector.h"
+#include "ui/markerspanel.h"
 #include "ui/mediabin.h"
 #include "ui/programmonitor.h"
 #include "ui/sourcemonitor.h"
@@ -33,6 +34,7 @@ VideoStudio::VideoStudio(Project *project, QWidget *parent)
     , m_program(new ProgramMonitor(project, this))
     , m_timeline(new TimelineWidget(project, TimelineWidget::Mode::All, this))
     , m_inspector(new ClipInspector(project, this))
+    , m_markers(new MarkersPanel(project, m_program->player(), this))
 {
     setObjectName(QStringLiteral("VideoStudio"));
     setWindowFlags(Qt::Widget);
@@ -49,6 +51,9 @@ VideoStudio::VideoStudio(Project *project, QWidget *parent)
     addDockWidget(Qt::LeftDockWidgetArea, binDock);
     addDockWidget(Qt::RightDockWidgetArea, inspectorDock);
     addDockWidget(Qt::BottomDockWidgetArea, timelineDock);
+    auto *markersDock = dock(this, tr("Markers"), QStringLiteral("video.markers"), m_markers);
+    tabifyDockWidget(inspectorDock, markersDock);
+    inspectorDock->raise();
     resizeDocks({sourceDock, inspectorDock}, {500, 330}, Qt::Horizontal);
     resizeDocks({timelineDock}, {300}, Qt::Vertical);
 

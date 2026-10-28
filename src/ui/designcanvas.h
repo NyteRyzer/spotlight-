@@ -3,6 +3,8 @@
 #include "core/designrender.h"
 
 #include <QUuid>
+#include <QVector>
+#include <QLineF>
 #include <QWidget>
 
 namespace spotlight {
@@ -31,6 +33,18 @@ public:
     void setBrush(bool enabled, const QColor &color, double width, bool eraser);
     bool brushEnabled() const { return m_brush; }
 
+    // View zoom (1 = fit the canvas in the window) and pan. Ctrl+wheel
+    // zooms at the cursor, the wheel / middle-drag / Space+drag pans.
+    double zoom() const { return m_zoom; }
+    void setZoom(double zoom, const QPointF &anchor = QPointF(-1, -1));
+    void zoomIn() { setZoom(m_zoom * 1.25); }
+    void zoomOut() { setZoom(m_zoom / 1.25); }
+    void zoomToFit();
+    // Snap moved layers to the canvas edges and centre and to other layers.
+    void setSnapping(bool on) { m_snapping = on; }
+    // Moves the selected layer by (dx, dy) canvas pixels (arrow keys).
+    void nudgeSelected(double dx, double dy);
+
 signals:
     void selectionChanged(const QUuid &layerId);
     void editTextRequested(const QUuid &layerId);
@@ -42,14 +56,21 @@ protected:
     void mouseMoveEvent(QMouseEvent *) override;
     void mouseReleaseEvent(QMouseEvent *) override;
     void mouseDoubleClickEvent(QMouseEvent *) override;
+    void wheelEvent(QWheelEvent *) override;
+    void keyPressEvent(QKeyEvent *) override;
+    void keyReleaseEvent(QKeyEvent *) override;
+    bool event(QEvent *) override;
     void dragEnterEvent(QDragEnterEvent *) override;
     void dropEvent(QDropEvent *) override;
 
 private:
-    enum class Drag { None, Move, Scale, Paint };
+    enum class Drag { None, Move, Scale, Paint, Pan };
 
     const DesignDocument &doc() const;
     QTransform viewTransform() const; // canvas -> widget
+    double fitScale() const;
+    // Snaps a moving layer's box (canvas coords) and records guide lines.
+    QPointF snapMove(const QRectF &box, const QUuid &movingId);
     QPointF toCanvas(const QPointF &widgetPos) const;
     QRectF handleRect(const DesignLayer &l) const; // in widget coords
 
@@ -66,6 +87,13 @@ private:
     QColor m_brushColor = Qt::white;
     double m_brushWidth = 12.0;
     bool m_eraser = false;
+    double m_zoom = 1.0;
+    QPointF m_pan;          // widget pixels
+    QPointF m_panStart;
+    QPointF m_panOrig;
+    bool m_spaceHeld = false;
+    bool m_snapping = true;
+    QVector<QLineF> m_snapLines; // canvas coords, shown while dragging
 };
 
 } // namespace spotlight

@@ -15,6 +15,7 @@
 #include "ui/sourcemonitor.h"
 #include "ui/inspector.h"
 #include "ui/exportdialog.h"
+#include "ui/markerspanel.h"
 #include "ui/mediabin.h"
 #include "ui/programmonitor.h"
 #include "ui/recoverydialog.h"
@@ -85,6 +86,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_autoClip, &AutoClipper::status, this, [this](const QString &m) { statusBar()->showMessage(m, 12000); });
     connect(m_video->mediaBin(), &MediaBin::autoClipRequested, this, &MainWindow::openAutoClip);
     connect(m_video->inspector(), &ClipInspector::freezeFrameRequested, m_tools, &EditTools::freezeFrame);
+    connect(m_video->markers(), &MarkersPanel::chaptersRequested, m_tools, &EditTools::youtubeChapters);
     connect(m_video->inspector(), &ClipInspector::reverseRequested, m_tools, &EditTools::reverseClip);
     connect(m_video->inspector(), &ClipInspector::editTitleRequested, m_tools, &EditTools::editTitle);
     connect(m_audio->inspector(), &ClipInspector::reverseRequested, m_tools, &EditTools::reverseClip);

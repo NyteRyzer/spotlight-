@@ -4,11 +4,14 @@
 #include "ui/theme.h"
 
 #include <QDragEnterEvent>
+#include <QKeyEvent>
+#include <QWheelEvent>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QUrl>
 
+#include <array>
 #include <cmath>
 
 namespace spotlight {
@@ -20,6 +23,7 @@ DesignCanvas::DesignCanvas(Project *project, QWidget *parent)
     setAcceptDrops(true);
     setMouseTracking(true);
     setMinimumSize(320, 200);
+    setFocusPolicy(Qt::StrongFocus);
     connect(project, &Project::changed, this, [this] {
         if (!m_selected.isNull() && !doc().layer(m_selected)) {
             m_selected = QUuid();
@@ -43,15 +47,95 @@ void DesignCanvas::setSelectedLayer(const QUuid &id)
     update();
 }
 
-QTransform DesignCanvas::viewTransform() const
+double DesignCanvas::fitScale() const
 {
     const QSizeF c = doc().canvasSize;
     const double margin = 24;
-    const double s = std::min((width() - 2 * margin) / c.width(), (height() - 2 * margin) / c.height());
+    return std::max(0.01, std::min((width() - 2 * margin) / c.width(), (height() - 2 * margin) / c.height()));
+}
+
+QTransform DesignCanvas::viewTransform() const
+{
+    const QSizeF c = doc().canvasSize;
+    const double s = fitScale() * m_zoom;
     QTransform t;
-    t.translate((width() - c.width() * s) / 2, (height() - c.height() * s) / 2);
+    t.translate((width() - c.width() * s) / 2 + m_pan.x(), (height() - c.height() * s) / 2 + m_pan.y());
     t.scale(s, s);
     return t;
+}
+
+void DesignCanvas::setZoom(double zoom, const QPointF &anchor)
+{
+    zoom = std::clamp(zoom, 0.1, 32.0);
+    // Keep the canvas point under `anchor` (default: the widget centre) still.
+    const QPointF a = anchor.x() < 0 ? QPointF(width() / 2.0, height() / 2.0) : anchor;
+    const QPointF canvasPt = toCanvas(a);
+    m_zoom = zoom;
+    const QPointF now = viewTransform().map(canvasPt);
+    m_pan += a - now;
+    update();
+}
+
+void DesignCanvas::zoomToFit()
+{
+    m_zoom = 1.0;
+    m_pan = QPointF();
+    update();
+}
+
+void DesignCanvas::nudgeSelected(double dx, double dy)
+{
+    const DesignLayer *l = m_project->data().design.layer(m_selected);
+    if (!l || l->locked)
+        return;
+    const QUuid id = m_selected;
+    // Repeated key presses merge into one undo step.
+    m_project->edit(
+        tr("Nudge Layer"),
+        [&](ProjectData &d) {
+            if (DesignLayer *t = d.design.layer(id))
+                t->position += QPointF(dx, dy);
+        },
+        QStringLiteral("nudge") + id.toString());
+}
+
+QPointF DesignCanvas::snapMove(const QRectF &box, const QUuid &movingId)
+{
+    m_snapLines.clear();
+    if (!m_snapping)
+        return {};
+    const QSizeF c = doc().canvasSize;
+    // Candidate lines: canvas edges and centre, other layers' edges and centres.
+    QVector<double> xs{0, c.width() / 2, c.width()}, ys{0, c.height() / 2, c.height()};
+    for (const DesignLayer &o : doc().layers) {
+        if (o.id == movingId || !o.visible)
+            continue;
+        const QRectF r = m_renderer.canvasPolygon(o).boundingRect();
+        xs << r.left() << r.center().x() << r.right();
+        ys << r.top() << r.center().y() << r.bottom();
+    }
+    const double tol = 8 / viewTransform().m11();
+    auto best = [&](const QVector<double> &lines, const std::array<double, 3> &edges, double *line) {
+        double shift = 0, dist = tol;
+        for (double l : lines) {
+            for (double e : edges) {
+                if (std::abs(l - e) < dist) {
+                    dist = std::abs(l - e);
+                    shift = l - e;
+                    *line = l;
+                }
+            }
+        }
+        return shift;
+    };
+    double lx = -1, ly = -1;
+    const double dx = best(xs, {box.left(), box.center().x(), box.right()}, &lx);
+    const double dy = best(ys, {box.top(), box.center().y(), box.bottom()}, &ly);
+    if (lx >= 0)
+        m_snapLines << QLineF(lx, 0, lx, c.height());
+    if (ly >= 0)
+        m_snapLines << QLineF(0, ly, c.width(), ly);
+    return {dx, dy};
 }
 
 QPointF DesignCanvas::toCanvas(const QPointF &widgetPos) const
@@ -116,6 +200,15 @@ void DesignCanvas::paintEvent(QPaintEvent *)
         p.drawText(vt.mapRect(stamp), Qt::AlignCenter, tr("timestamp"));
     }
 
+    if (!m_snapLines.isEmpty()) {
+        p.save();
+        p.setTransform(vt);
+        p.setPen(QPen(QColor(255, 60, 200), 0));
+        for (const QLineF &l : m_snapLines)
+            p.drawLine(l);
+        p.restore();
+    }
+
     // Selection outline + scale handle.
     if (const DesignLayer *l = doc().layer(m_selected)) {
         const QPolygonF poly = vt.map(m_renderer.canvasPolygon(*l));
@@ -130,7 +223,8 @@ void DesignCanvas::paintEvent(QPaintEvent *)
 
     p.setPen(theme::textDim);
     p.drawText(rect().adjusted(8, 4, -8, -4), Qt::AlignBottom | Qt::AlignRight,
-               QStringLiteral("%1 × %2").arg(doc().canvasSize.width()).arg(doc().canvasSize.height()));
+               QStringLiteral("%1 × %2   %3%").arg(doc().canvasSize.width()).arg(doc().canvasSize.height())
+                   .arg(int(std::lround(fitScale() * m_zoom * 100))));
 }
 
 void DesignCanvas::setBrush(bool enabled, const QColor &color, double width, bool eraser)
@@ -144,6 +238,14 @@ void DesignCanvas::setBrush(bool enabled, const QColor &color, double width, boo
 
 void DesignCanvas::mousePressEvent(QMouseEvent *e)
 {
+    setFocus();
+    if (e->button() == Qt::MiddleButton || (e->button() == Qt::LeftButton && m_spaceHeld)) {
+        m_drag = Drag::Pan;
+        m_panStart = e->position();
+        m_panOrig = m_pan;
+        setCursor(Qt::ClosedHandCursor);
+        return;
+    }
     if (e->button() != Qt::LeftButton)
         return;
     const QPointF cpos = toCanvas(e->position());
@@ -194,6 +296,11 @@ void DesignCanvas::mousePressEvent(QMouseEvent *e)
 
 void DesignCanvas::mouseMoveEvent(QMouseEvent *e)
 {
+    if (m_drag == Drag::Pan) {
+        m_pan = m_panOrig + (e->position() - m_panStart);
+        update();
+        return;
+    }
     if (m_drag == Drag::Paint) {
         if (DesignLayer *l = m_preview.layer(m_orig.id); l && !l->strokes.isEmpty()) {
             const QPointF pt = m_renderer.layerTransform(*l).inverted().map(toCanvas(e->position()));
@@ -224,18 +331,15 @@ void DesignCanvas::mouseMoveEvent(QMouseEvent *e)
         return;
     const QPointF cpos = toCanvas(e->position());
     if (m_drag == Drag::Move) {
-        QPointF pos = m_orig.position + (cpos - m_pressCanvas);
-        // Snap the layer's centre to the canvas centre lines.
-        const QRectF r = m_renderer.localRect(m_orig);
-        const QPointF half(r.width() * m_orig.scale / 2, r.height() * m_orig.scale / 2);
-        const QPointF centre = pos + half;
-        const QSizeF c = m_preview.canvasSize;
-        const double tol = 10 / viewTransform().m11();
-        if (std::abs(centre.x() - c.width() / 2) < tol)
-            pos.setX(c.width() / 2 - half.x());
-        if (std::abs(centre.y() - c.height() / 2) < tol)
-            pos.setY(c.height() / 2 - half.y());
-        l->position = pos;
+        const QPointF delta = cpos - m_pressCanvas;
+        l->position = m_orig.position + delta;
+        // Snap the box to the canvas and other layers (hold Alt to move freely).
+        if (!(e->modifiers() & Qt::AltModifier)) {
+            const QRectF box = m_renderer.canvasPolygon(*l).boundingRect();
+            l->position += snapMove(box, l->id);
+        } else {
+            m_snapLines.clear();
+        }
     } else {
         // Uniform scale around the layer's centre, by distance from it.
         const QRectF r = m_renderer.localRect(m_orig);
@@ -253,6 +357,12 @@ void DesignCanvas::mouseMoveEvent(QMouseEvent *e)
 
 void DesignCanvas::mouseReleaseEvent(QMouseEvent *)
 {
+    m_snapLines.clear();
+    if (m_drag == Drag::Pan) {
+        m_drag = Drag::None;
+        setCursor(m_spaceHeld ? Qt::OpenHandCursor : (m_brush ? Qt::CrossCursor : Qt::ArrowCursor));
+        return;
+    }
     if (m_previewActive) {
         const DesignDocument result = m_preview;
         m_previewActive = false;
@@ -270,6 +380,66 @@ void DesignCanvas::mouseDoubleClickEvent(QMouseEvent *e)
     const DesignLayer *l = doc().layer(hit);
     if (l && l->type == LayerType::Text)
         emit editTextRequested(hit);
+}
+
+void DesignCanvas::wheelEvent(QWheelEvent *e)
+{
+    if (e->modifiers() & Qt::ControlModifier) {
+        const double steps = e->angleDelta().y() / 120.0;
+        setZoom(m_zoom * std::pow(1.15, steps), e->position());
+    } else {
+        // Two-finger scroll / wheel pans (Shift: horizontal on a mouse wheel).
+        QPointF d = e->pixelDelta().isNull() ? QPointF(e->angleDelta()) / 2.0 : QPointF(e->pixelDelta());
+        if (e->modifiers() & Qt::ShiftModifier && d.x() == 0)
+            d = QPointF(d.y(), 0);
+        m_pan += d;
+        update();
+    }
+    e->accept();
+}
+
+bool DesignCanvas::event(QEvent *e)
+{
+    // Arrow keys nudge the selected layer instead of moving the playhead.
+    if (e->type() == QEvent::ShortcutOverride && !m_selected.isNull()) {
+        auto *ke = static_cast<QKeyEvent *>(e);
+        const int k = ke->key();
+        if ((k == Qt::Key_Left || k == Qt::Key_Right || k == Qt::Key_Up || k == Qt::Key_Down)
+            && !(ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+            e->accept();
+            return true;
+        }
+    }
+    return QWidget::event(e);
+}
+
+void DesignCanvas::keyPressEvent(QKeyEvent *e)
+{
+    const double step = (e->modifiers() & Qt::ShiftModifier) ? 10 : 1;
+    switch (e->key()) {
+    case Qt::Key_Left: nudgeSelected(-step, 0); return;
+    case Qt::Key_Right: nudgeSelected(step, 0); return;
+    case Qt::Key_Up: nudgeSelected(0, -step); return;
+    case Qt::Key_Down: nudgeSelected(0, step); return;
+    case Qt::Key_Space:
+        if (!e->isAutoRepeat()) {
+            m_spaceHeld = true;
+            setCursor(Qt::OpenHandCursor);
+        }
+        return;
+    default:
+        QWidget::keyPressEvent(e);
+    }
+}
+
+void DesignCanvas::keyReleaseEvent(QKeyEvent *e)
+{
+    if (e->key() == Qt::Key_Space && !e->isAutoRepeat()) {
+        m_spaceHeld = false;
+        setCursor(m_brush ? Qt::CrossCursor : Qt::ArrowCursor);
+        return;
+    }
+    QWidget::keyReleaseEvent(e);
 }
 
 void DesignCanvas::dragEnterEvent(QDragEnterEvent *e)

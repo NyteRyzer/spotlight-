@@ -5,7 +5,10 @@
 #include "media/mediaprobe.h"
 #include "ui/theme.h"
 
+#include <QComboBox>
+#include <QDesktopServices>
 #include <QDragEnterEvent>
+#include <QLineEdit>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
@@ -87,6 +90,8 @@ MediaBin::MediaBin(Project *project, QWidget *parent)
     : QWidget(parent)
     , m_project(project)
     , m_list(new BinList(this))
+    , m_search(new QLineEdit(this))
+    , m_sort(new QComboBox(this))
     , m_hint(new QLabel(this))
     , m_probe(new MediaProbe(this))
     , m_thumbProbe(new MediaProbe(this))
@@ -107,6 +112,19 @@ MediaBin::MediaBin(Project *project, QWidget *parent)
     bar->addWidget(removeBtn);
     bar->addStretch();
     layout->addLayout(bar);
+
+    auto *find = new QHBoxLayout;
+    m_search->setObjectName(QStringLiteral("binSearch"));
+    m_search->setPlaceholderText(tr("Search media…"));
+    m_search->setClearButtonEnabled(true);
+    m_sort->setObjectName(QStringLiteral("binSort"));
+    m_sort->addItems({tr("Import order"), tr("Name"), tr("Longest first"), tr("Type"), tr("Unused first")});
+    m_sort->setToolTip(tr("Sort the Media Bin"));
+    find->addWidget(m_search, 1);
+    find->addWidget(m_sort);
+    layout->addLayout(find);
+    connect(m_search, &QLineEdit::textChanged, this, &MediaBin::rebuild);
+    connect(m_sort, &QComboBox::currentIndexChanged, this, &MediaBin::rebuild);
 
     m_list->setViewMode(QListView::IconMode);
     m_list->setIconSize(QSize(160, 90));
@@ -143,6 +161,11 @@ MediaBin::MediaBin(Project *project, QWidget *parent)
                                             : tr("Auto-Clip: Find Highlights…"),
                                         this, [this, id] { emit autoClipRequested(id); });
             a->setEnabled(!m_analyzing.contains(id));
+        }
+        if (m && !m->isTitle() && QFileInfo::exists(m->path)) {
+            const QString dir = QFileInfo(m->path).absolutePath();
+            menu.addAction(tr("Show in Folder"), this,
+                           [dir] { QDesktopServices::openUrl(QUrl::fromLocalFile(dir)); });
         }
         menu.addSeparator();
         menu.addAction(tr("Remove from Project"), this, &MediaBin::removeSelected);
@@ -275,13 +298,45 @@ void MediaBin::rebuild()
             + QString::number(m.highlightsAnalyzed ? m.highlights.size() : -1)
             + (m_analyzing.contains(m.id) ? QLatin1Char('a') : QLatin1Char('-'));
     }
-    if (signature == m_shownSignature && m_list->count() == m_project->data().media.size())
+    // Which items the timeline uses (for "Unused first" and the dimmed look).
+    QSet<QUuid> used;
+    for (const Track &t : m_project->data().tracks) {
+        for (const Clip &c : t.clips)
+            used.insert(c.mediaId);
+    }
+    for (const MediaItem &m : m_project->data().media)
+        signature += used.contains(m.id) ? QLatin1Char('u') : QLatin1Char('-');
+    signature += QLatin1Char('|') + m_search->text() + QLatin1Char('|') + QString::number(m_sort->currentIndex());
+    if (signature == m_shownSignature)
         return;
     m_shownSignature = signature;
 
+    // Filter by every word of the search, then sort.
+    const QStringList words = m_search->text().toLower().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    QVector<const MediaItem *> shownItems;
+    for (const MediaItem &m : m_project->data().media) {
+        const QString hay = (m.name + QLatin1Char(' ') + QFileInfo(m.path).fileName()).toLower();
+        bool match = true;
+        for (const QString &w : words)
+            match = match && hay.contains(w);
+        if (match)
+            shownItems.append(&m);
+    }
+    const int sort = m_sort->currentIndex();
+    std::stable_sort(shownItems.begin(), shownItems.end(), [&](const MediaItem *a, const MediaItem *b) {
+        switch (sort) {
+        case 1: return a->name.compare(b->name, Qt::CaseInsensitive) < 0;
+        case 2: return a->duration > b->duration;
+        case 3: return int(a->kind) < int(b->kind);
+        case 4: return !used.contains(a->id) && used.contains(b->id);
+        default: return false;
+        }
+    });
+
     const QUuid current = currentMedia();
     m_list->clear();
-    for (const MediaItem &m : m_project->data().media) {
+    for (const MediaItem *mp : shownItems) {
+        const MediaItem &m = *mp;
         if (!m_thumbs.contains(m.path) && !m_thumbRequested.contains(m.path) && QFileInfo::exists(m.path)) {
             m_thumbRequested.insert(m.path);
             m_thumbProbe->probe(m.path);
@@ -304,11 +359,19 @@ void MediaBin::rebuild()
             tip += m.highlights.isEmpty() ? tr("\nAuto-Clip: no standout moments found")
                                           : tr("\nAuto-Clip: %n highlight(s) — right-click → Auto-Clip to review",
                                                nullptr, m.highlights.size());
+        if (!used.contains(m.id))
+            tip += tr("\nNot used on the timeline");
         item->setToolTip(tip);
+        if (!used.contains(m.id) && m_project->data().duration() > 0)
+            item->setForeground(QColor(150, 150, 160));
         if (m.id == current)
             m_list->setCurrentItem(item);
     }
-    m_hint->setVisible(m_project->data().media.isEmpty());
+    m_hint->setVisible(m_project->data().media.isEmpty() || shownItems.isEmpty());
+    if (!m_project->data().media.isEmpty() && shownItems.isEmpty())
+        m_hint->setText(tr("Nothing matches “%1”.").arg(m_search->text()));
+    else
+        m_hint->setText(tr("Import media or drop files here.\nThen drag clips onto the timeline."));
 }
 
 } // namespace spotlight

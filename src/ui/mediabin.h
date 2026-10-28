@@ -8,6 +8,8 @@
 #include <QUuid>
 #include <QWidget>
 
+class QComboBox;
+class QLineEdit;
 class QListWidget;
 class QLabel;
 
@@ -50,6 +52,8 @@ private:
 
     Project *m_project;
     QListWidget *m_list;
+    QLineEdit *m_search;
+    QComboBox *m_sort; // import order, name, duration, type, unused first
     QLabel *m_hint;
     MediaProbe *m_probe;      // imports
     MediaProbe *m_thumbProbe; // thumbnails for media loaded from a project file

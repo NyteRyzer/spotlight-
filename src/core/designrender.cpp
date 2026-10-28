@@ -298,6 +298,32 @@ QTransform DesignRenderer::layerTransform(const DesignLayer &l)
     return t;
 }
 
+void DesignRenderer::resizeDocument(DesignDocument &doc, const QSize &size)
+{
+    const QSizeF old = doc.canvasSize;
+    if (old.isEmpty() || size.isEmpty() || QSize(old.toSize()) == size) {
+        doc.canvasSize = size;
+        return;
+    }
+    const double fit = std::min(size.width() / old.width(), size.height() / old.height());
+    const double cover = std::max(size.width() / old.width(), size.height() / old.height());
+    const QPointF oldCentre(old.width() / 2, old.height() / 2);
+    const QPointF newCentre(size.width() / 2.0, size.height() / 2.0);
+    const QRectF canvas(QPointF(0, 0), old);
+    for (DesignLayer &l : doc.layers) {
+        const QRectF bounds = canvasPolygon(l).boundingRect();
+        const QRectF covered = bounds.intersected(canvas);
+        const bool background = covered.width() * covered.height() >= 0.9 * old.width() * old.height();
+        const double f = background ? cover : fit;
+        const QRectF r = localRect(l);
+        const QPointF centre = l.position + QPointF(r.width() * l.scale / 2, r.height() * l.scale / 2);
+        const QPointF moved = newCentre + (centre - oldCentre) * f;
+        l.scale *= f;
+        l.position = moved - QPointF(r.width() * l.scale / 2, r.height() * l.scale / 2);
+    }
+    doc.canvasSize = size;
+}
+
 QPolygonF DesignRenderer::canvasPolygon(const DesignLayer &l)
 {
     return layerTransform(l).map(QPolygonF(localRect(l)));

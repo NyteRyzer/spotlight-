@@ -29,6 +29,7 @@
 #include <QAction>
 #include <QDockWidget>
 #include <QComboBox>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QSettings>
 #include <QTimer>
@@ -226,6 +227,55 @@ private slots:
 
 
     // Records a real take from the default input (skipped without one).
+    void designSmartResize()
+    {
+        DesignDocument doc;
+        doc.canvasSize = QSize(1280, 720);
+        DesignLayer bg;
+        bg.id = QUuid::createUuid();
+        bg.type = LayerType::Shape;
+        bg.shapeSize = QSize(1280, 720);
+        DesignLayer badge = bg;
+        badge.id = QUuid::createUuid();
+        badge.shapeSize = QSize(200, 100);
+        badge.position = QPointF(540, 310); // centred
+        doc.layers = {bg, badge};
+        DesignRenderer r;
+        r.resizeDocument(doc, QSize(1080, 1920)); // landscape -> story
+        QCOMPARE(doc.canvasSize, QSize(1080, 1920));
+        // The background still covers the whole canvas.
+        const QRectF b = r.canvasPolygon(doc.layers[0]).boundingRect();
+        QVERIFY2(b.left() <= 0.5 && b.top() <= 0.5 && b.right() >= 1079.5 && b.bottom() >= 1919.5,
+                 qPrintable(QStringLiteral("%1,%2 %3x%4").arg(b.x()).arg(b.y()).arg(b.width()).arg(b.height())));
+        // The badge fits (scaled by 1080/1280) and stays centred.
+        const QRectF k = r.canvasPolygon(doc.layers[1]).boundingRect();
+        QVERIFY(std::abs(k.center().x() - 540) < 0.5 && std::abs(k.center().y() - 960) < 0.5);
+        QVERIFY(std::abs(k.width() - 200 * 1080.0 / 1280.0) < 0.5);
+    }
+
+    void designTemplatesRender()
+    {
+        Project project;
+        DesignStudio studio(&project);
+        const int n = int(DesignStudio::templateNames().size());
+        QCOMPARE(n, 8);
+        const QString dump = qEnvironmentVariable("SPOTLIGHT_TEMPLATE_DUMP");
+        for (int i = 0; i < n; ++i) {
+            studio.applyTemplate(i);
+            const QImage img = studio.renderImage();
+            QCOMPARE(img.size(), project.data().design.canvasSize);
+            // Something was drawn over the plain background.
+            const QRgb bg = project.data().design.background.rgb();
+            int differing = 0;
+            for (int y = 0; y < img.height(); y += 16)
+                for (int x = 0; x < img.width(); x += 16)
+                    differing += img.pixel(x, y) != bg ? 1 : 0;
+            QVERIFY2(differing > 50, qPrintable(DesignStudio::templateNames()[i]));
+            if (!dump.isEmpty())
+                img.save(QStringLiteral("%1/template-%2.png").arg(dump).arg(i));
+        }
+    }
+
     void recordsAudioTakes()
     {
         // Device lists can fill in asynchronously after startup.
@@ -421,6 +471,15 @@ private slots:
             QTRY_COMPARE_WITH_TIMEOUT(project->data().media.size(), 1, 15000);
             QVERIFY(project->data().media[0].duration > 0);
             const QUuid mid = project->data().media[0].id;
+            // Media Bin search hides what doesn't match.
+            auto *search = video->mediaBin()->findChild<QLineEdit *>("binSearch");
+            auto *binList = video->mediaBin()->findChild<QListWidget *>();
+            QVERIFY(search && binList);
+            search->setText("nomatch");
+            QCOMPARE(binList->count(), 0);
+            search->setText("CLIP");
+            QCOMPARE(binList->count(), 1);
+            search->clear();
             project->edit("Add", [&](ProjectData &d) { timeline::placeMedia(d, mid, 0, 0); });
             QVERIFY(project->data().duration() > 0);
 
