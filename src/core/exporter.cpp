@@ -204,8 +204,8 @@ MotionExpr motionExpr(Motion m, TimeUs duration)
     case Motion::SlideInUp:
     case Motion::PopIn: {
         // Mirrors motionAt(): e0 = linear progress, rem = (1-e0)^3 = 1 - eased.
-        const QString e0 = QStringLiteral("min(max(t/%1\,0)\,1)").arg(num(kEntranceSeconds));
-        const QString rem = QStringLiteral("pow(1-%1\,3)").arg(e0);
+        const QString e0 = QStringLiteral("min(max(t/%1\\,0)\\,1)").arg(num(kEntranceSeconds));
+        const QString rem = QStringLiteral("pow(1-%1\\,3)").arg(e0);
         if (m == Motion::SlideInLeft)
             e.fx = QStringLiteral("(-%1)").arg(rem);
         else if (m == Motion::SlideInRight)
@@ -213,7 +213,7 @@ MotionExpr motionExpr(Motion m, TimeUs duration)
         else if (m == Motion::SlideInUp)
             e.fy = rem;
         else
-            e.zoom = QStringLiteral("if(lt(%1\,0.7)\,0.6+0.5*%1/0.7\,1.1-0.1*(%1-0.7)/0.3)").arg(e0);
+            e.zoom = QStringLiteral("if(lt(%1\\,0.7)\\,0.6+0.5*%1/0.7\\,1.1-0.1*(%1-0.7)/0.3)").arg(e0);
         break;
     }
     }

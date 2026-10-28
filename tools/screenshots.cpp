@@ -186,6 +186,11 @@ int main(int argc, char *argv[])
         pc->transform.x = 0.31;
         pc->transform.y = -0.28;
         pc->fadeIn = pc->fadeOut = 300 * kUsPerSecond / 1000;
+        pc->fx.border = 0.012;
+        pc->name = QStringLiteral("Facecam");
+        pc->colorLabel = 7;
+        d.clipById(v1a)->colorLabel = 2;
+        d.clipById(v1c)->colorLabel = 5;
         const int v3 = d.addTrack(TrackType::Video, QStringLiteral("V3"));
         const QUuid lt = timeline::placeMedia(d, lowerThird.id, v3, 8 * kUsPerSecond, 0, 6 * kUsPerSecond);
         d.clipById(lt)->fadeIn = d.clipById(lt)->fadeOut = 300 * kUsPerSecond / 1000;
@@ -229,6 +234,8 @@ int main(int argc, char *argv[])
         timeline::toggleMarker(d, 0, 0, QStringLiteral("Intro"));
         timeline::toggleMarker(d, 7 * kUsPerSecond, 0, QStringLiteral("The Build"));
         timeline::toggleMarker(d, 15 * kUsPerSecond, 0, QStringLiteral("Outro"));
+        d.inPoint = 7 * kUsPerSecond;
+        d.outPoint = 15 * kUsPerSecond;
     });
 
     // ---- Design: capture a frame, apply a template, write our own copy ----
