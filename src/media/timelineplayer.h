@@ -36,6 +36,8 @@ public:
 
     TimeUs position() const { return m_pos; }
     bool isPlaying() const { return m_playing; }
+    double shuttleRate() const { return m_rate; }
+    bool looping() const { return m_loop; }
 
 public slots:
     void play();
@@ -43,6 +45,13 @@ public slots:
     void togglePlay();
     void seek(spotlight::TimeUs t);
     void stepFrames(int frames);
+    // J/K/L: L plays and steps the rate 1x -> 2x -> 4x, K stops, J jumps
+    // back 5 seconds (and slows a fast shuttle down first).
+    void shuttleForward();
+    void shuttleStop();
+    void shuttleBack();
+    // Loops playback over the In/Out range (or the whole timeline).
+    void setLooping(bool on) { m_loop = on; }
 
 signals:
     void positionChanged(spotlight::TimeUs t);
@@ -84,6 +93,8 @@ private:
     TimeUs m_clockBase = 0;
     TimeUs m_pos = 0;
     bool m_playing = false;
+    bool m_loop = false;
+    double m_rate = 1.0; // shuttle speed
     QHash<QString, QImage> m_stills;
 };
 

@@ -25,6 +25,11 @@ inline TimeUs secondsToUs(double s) { return TimeUs(s * double(kUsPerSecond)); }
 // Formats a time as HH:MM:SS:FF using the given frame rate.
 QString formatTimecode(TimeUs t, double fps);
 
+// Parses what someone types into "Go to timecode": HH:MM:SS:FF, MM:SS,
+// H:MM:SS, plain seconds ("90", "12.5") or a frame offset ("+12" / "-5"
+// frames from `current`). Returns -1 if the text isn't a time.
+TimeUs parseTimecode(const QString &text, double fps, TimeUs current = 0);
+
 // Formats a time as a compact human readable duration ("1:05", "1:02:03").
 QString formatDuration(TimeUs t);
 

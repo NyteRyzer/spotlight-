@@ -300,6 +300,35 @@ void TimelineWidget::paintEvent(QPaintEvent *)
 
     paintRuler(p);
 
+    // In/Out range: a bar on the ruler, the lanes outside it dimmed.
+    const ProjectData &sd = shown();
+    if (sd.inPoint >= 0 || sd.outPoint >= 0) {
+        const int right = width() - m_vbar->width();
+        const int xi = sd.inPoint >= 0 ? std::max(kHeaderWidth, xForTime(sd.inPoint)) : kHeaderWidth;
+        const int xo = sd.outPoint >= 0 ? std::min(right, xForTime(sd.outPoint)) : right;
+        const int lanesBottom = height() - m_hbar->height();
+        if (xi > kHeaderWidth)
+            p.fillRect(QRect(kHeaderWidth, kRulerHeight, xi - kHeaderWidth, lanesBottom - kRulerHeight),
+                       QColor(0, 0, 0, 90));
+        if (xo < right)
+            p.fillRect(QRect(xo, kRulerHeight, right - xo, lanesBottom - kRulerHeight), QColor(0, 0, 0, 90));
+        if (xo > xi)
+            p.fillRect(QRect(xi, kRulerHeight - 4, xo - xi, 4), QColor(90, 160, 255, 200));
+        p.setPen(QPen(QColor(90, 160, 255), 1.5));
+        if (sd.inPoint >= 0 && xForTime(sd.inPoint) >= kHeaderWidth) {
+            const int x = xForTime(sd.inPoint);
+            p.drawLine(x, 0, x, kRulerHeight);
+            p.drawLine(x, 0, x + 5, 0);
+            p.drawLine(x, kRulerHeight - 1, x + 5, kRulerHeight - 1);
+        }
+        if (sd.outPoint >= 0 && xForTime(sd.outPoint) <= right) {
+            const int x = xForTime(sd.outPoint);
+            p.drawLine(x, 0, x, kRulerHeight);
+            p.drawLine(x, 0, x - 5, 0);
+            p.drawLine(x, kRulerHeight - 1, x - 5, kRulerHeight - 1);
+        }
+    }
+
     // Marker guide lines through the lanes.
     p.setPen(QPen(QColor(255, 196, 0, 70), 1, Qt::DashLine));
     for (const Marker &m : shown().markers) {
@@ -470,7 +499,9 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
     QColor base = t.isAudio() ? theme::audioClip
                               : (m && m->isTitle() ? theme::titleClip
                                                    : (m && m->isStill() ? theme::imageClip : theme::videoClip));
-    if (t.muted)
+    if (c.colorLabel > 0 && c.colorLabel < clipLabelColors().size())
+        base = clipLabelColors()[c.colorLabel];
+    if (t.muted || !c.enabled)
         base = base.darker(180);
     p.setPen(Qt::NoPen);
     p.setBrush(base.darker(130));
@@ -525,8 +556,14 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
         }
     }
 
-    p.setPen(Qt::white);
-    QString label = m ? m->name : tr("(missing media)");
+    // Disabled: hatched over, dimmed.
+    if (!c.enabled) {
+        p.fillRect(r, QBrush(QColor(0, 0, 0, 120), Qt::BDiagPattern));
+        p.fillRect(r, QColor(0, 0, 0, 70));
+    }
+
+    p.setPen(c.enabled ? QColor(Qt::white) : QColor(170, 170, 180));
+    QString label = !c.name.isEmpty() ? c.name : (m ? m->name : tr("(missing media)"));
     if (!c.linkId.isNull())
         label = QStringLiteral("⇄ ") + label;
     // Badges for what's applied to the clip.
@@ -542,7 +579,11 @@ void TimelineWidget::paintClip(QPainter &p, const Row &row, const Clip &c)
             badges << QStringLiteral("▣");
         if (c.stabilize)
             badges << QStringLiteral("≋");
+        if (!c.fx.isNone())
+            badges << QStringLiteral("✦");
     }
+    if (!c.enabled)
+        badges.prepend(tr("OFF"));
     if (!badges.isEmpty())
         label = badges.join(QLatin1Char(' ')) + QStringLiteral("  ") + label;
     p.drawText(title.adjusted(5, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,

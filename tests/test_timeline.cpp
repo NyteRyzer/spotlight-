@@ -427,6 +427,19 @@ private slots:
         checkInvariants(d);
     }
 
+    void parsesTimecodes()
+    {
+        const TimeUs S = kUsPerSecond;
+        QCOMPARE(parseTimecode("00:01:02:15", 30), 62 * S + S / 2);
+        QCOMPARE(parseTimecode("1:30", 30), 90 * S);
+        QCOMPARE(parseTimecode("1:00:00", 30), 3600 * S);
+        QCOMPARE(parseTimecode("12.5", 30), 12 * S + S / 2);
+        QCOMPARE(parseTimecode("+30", 30, 10 * S), 11 * S);
+        QCOMPARE(parseTimecode("-60", 30, S), TimeUs(0));
+        QCOMPARE(parseTimecode("abc", 30), TimeUs(-1));
+        QCOMPARE(parseTimecode("", 30), TimeUs(-1));
+    }
+
     void ripplesMoveMarkers()
     {
         ProjectData d = ProjectData::createDefault();

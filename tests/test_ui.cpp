@@ -3,6 +3,7 @@
 #include "core/project.h"
 #include "core/timelineops.h"
 #include "ui/designstudio.h"
+#include "ui/commandpalette.h"
 #include "ui/mainwindow.h"
 #include "ui/mediabin.h"
 #include "media/timelineplayer.h"
@@ -390,6 +391,21 @@ private slots:
         auto *project = w.findChild<Project *>();
         QVERIFY(video && design && project);
         QVERIFY2(QFile::exists(QStringLiteral(":/icons/spotlight.png")), "app icon resource missing");
+
+        // Every shortcut belongs to exactly one command.
+        QHash<QString, QString> keys;
+        for (QAction *a : w.findChildren<QAction *>()) {
+            const QString k = a->shortcut().toString();
+            if (k.isEmpty())
+                continue;
+            QVERIFY2(!keys.contains(k), qPrintable(QStringLiteral("%1 is used by both \"%2\" and \"%3\"")
+                                                       .arg(k, keys.value(k), a->text())));
+            keys.insert(k, a->text());
+        }
+        QVERIFY(CommandPalette::matchScore("split play", "Timeline ▸ Split at Playhead") > 0);
+        QCOMPARE(CommandPalette::matchScore("xyz", "Timeline ▸ Split at Playhead"), 0);
+        QVERIFY(CommandPalette::matchScore("mark", "Timeline ▸ Add / Remove Marker")
+                > CommandPalette::matchScore("ark", "Timeline ▸ Add / Remove Marker"));
 
         // Import a generated clip if ffmpeg is available.
         const QString ffmpeg = Exporter::findFfmpeg();

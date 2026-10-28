@@ -123,6 +123,12 @@ void SourceMonitor::loadRange(const MediaItem &item, TimeUs in, TimeUs out)
     updateLabels();
 }
 
+void SourceMonitor::loadAt(const MediaItem &item, TimeUs in, TimeUs out, TimeUs at)
+{
+    loadRange(item, in, out);
+    m_pendingSeekMs = usToMs(std::max<TimeUs>(0, at));
+}
+
 QImage SourceMonitor::currentFrame() const
 {
     return m_view->currentFrame();

@@ -219,6 +219,13 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
              t.fx.reverbMix = 0.45;
              t.fx.reverbSize = 0.9;
          }},
+        {tr("Phone Call"), tr("Narrow, lo-fi telephone voice"), [](Track &t) { t.fx.telephone = true; }},
+        {tr("Underwater"), tr("Muffled: low-pass at 600 Hz plus reverb"),
+         [](Track &t) {
+             t.fx.lowpassHz = 600;
+             t.fx.reverbEnabled = true;
+             t.fx.reverbMix = 0.3;
+         }},
         {tr("Clear All"), tr("Remove every effect from this track"), [](Track &t) {
              t.fx = AudioFx();
              t.voice = false;
@@ -265,6 +272,19 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
     auto *voice = section(tr("Voice Changer"));
     slider(voice, tr("Pitch"), -12, 12, 1, QStringLiteral(" st"), [](const Track &t) { return t.fx.pitchSemitones; },
            [](Track &t, double v) { t.fx.pitchSemitones = v; });
+    check(voice, tr("Telephone / radio"), [](const Track &t) { return t.fx.telephone; },
+          [](Track &t, bool on) { t.fx.telephone = on; });
+    check(voice, tr("Chorus (thicker, doubled)"), [](const Track &t) { return t.fx.chorus; },
+          [](Track &t, bool on) { t.fx.chorus = on; });
+
+    auto *filters = section(tr("Filters"));
+    slider(filters, tr("High-pass (cut lows)"), 0, 100, 10, QStringLiteral(" Hz"),
+           [](const Track &t) { return t.fx.highpassHz; }, [](Track &t, double v) { t.fx.highpassHz = v; });
+    slider(filters, tr("Low-pass (cut highs)"), 0, 200, 100, QStringLiteral(" Hz"),
+           [](const Track &t) { return t.fx.lowpassHz; }, [](Track &t, double v) { t.fx.lowpassHz = v; });
+    auto *filterNote = new QLabel(tr("0 Hz = off"), m_body);
+    filterNote->setStyleSheet(QStringLiteral("color: #6f6f7a;"));
+    filters->addRow(filterNote);
 
     auto *space = section(tr("Space"));
     check(space, tr("Reverb"), [](const Track &t) { return t.fx.reverbEnabled; },
@@ -281,6 +301,8 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
            [](Track &t, double v) { t.fx.echoFeedback = v / 100.0; });
 
     auto *out = section(tr("Output"));
+    check(out, tr("Mono (fold to centre)"), [](const Track &t) { return t.fx.mono; },
+          [](Track &t, bool on) { t.fx.mono = on; });
     check(out, tr("Limiter (never clip)"), [](const Track &t) { return t.fx.limiterEnabled; },
           [](Track &t, bool on) { t.fx.limiterEnabled = on; });
     slider(out, tr("Ceiling"), -12, 0, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.limiterCeilingDb; },

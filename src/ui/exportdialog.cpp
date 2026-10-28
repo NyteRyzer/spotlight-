@@ -2,6 +2,7 @@
 
 #include "core/exporter.h"
 #include "core/project.h"
+#include "core/timelineops.h"
 
 #include <QComboBox>
 #include <QDir>
@@ -34,6 +35,7 @@ ExportDialog::ExportDialog(Project *project, QWidget *parent)
     , m_crf(new QSpinBox(this))
     , m_audioKbps(new QSpinBox(this))
     , m_loudness(new QComboBox(this))
+    , m_range(new QComboBox(this))
     , m_path(new QLineEdit(this))
     , m_progress(new QProgressBar(this))
     , m_info(new QLabel(this))
@@ -73,6 +75,15 @@ ExportDialog::ExportDialog(Project *project, QWidget *parent)
     m_loudness->setToolTip(tr("Normalize the final mix to the loudness the platform plays at, "
                               "so your video isn't quieter or louder than everything else."));
     form->addRow(tr("Loudness"), m_loudness);
+    const ProjectData &pd = m_project->data();
+    m_range->addItem(tr("Entire timeline (%1)").arg(formatDuration(pd.duration())));
+    if (pd.hasRange()) {
+        m_range->addItem(tr("In to Out (%1)").arg(formatDuration(pd.outPoint - pd.inPoint)));
+        m_range->setCurrentIndex(1);
+    } else {
+        m_range->setToolTip(tr("Mark In (I) and Out (O) on the timeline to export just a part"));
+    }
+    form->addRow(tr("Range"), m_range);
 
     auto *pathRow = new QHBoxLayout;
     pathRow->addWidget(m_path, 1);
@@ -206,7 +217,11 @@ void ExportDialog::start()
     QSettings().setValue(QStringLiteral("paths/export"), QFileInfo(path).absolutePath());
     QString err;
     m_progress->setValue(0);
-    if (!m_exporter->start(m_project->data(), currentSettings(), path, &err)) {
+    const ProjectData &pd = m_project->data();
+    const ProjectData data = m_range->currentIndex() == 1 && pd.hasRange()
+        ? timeline::rangeProject(pd, pd.inPoint, pd.outPoint)
+        : pd;
+    if (!m_exporter->start(data, currentSettings(), path, &err)) {
         QMessageBox::warning(this, tr("Cannot Export"), err);
         return;
     }

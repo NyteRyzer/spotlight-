@@ -148,6 +148,7 @@ void TimelinePlayer::pause()
     if (!m_playing)
         return;
     m_playing = false;
+    m_rate = 1.0;
     m_timer.stop();
     for (auto &v : m_video)
         v.player->pause();
@@ -183,10 +184,49 @@ void TimelinePlayer::stepFrames(int frames)
     seek(snapToFrame(m_pos, fps) + TimeUs(std::llround(frames * kUsPerSecond / fps)));
 }
 
+void TimelinePlayer::shuttleForward()
+{
+    if (!m_playing) {
+        m_rate = 1.0;
+        play();
+        return;
+    }
+    m_rate = m_rate >= 4.0 ? 4.0 : m_rate * 2.0;
+    m_clockBase = m_pos;
+    m_clock.restart();
+    sync(true);
+}
+
+void TimelinePlayer::shuttleStop()
+{
+    pause();
+}
+
+void TimelinePlayer::shuttleBack()
+{
+    if (m_playing && m_rate > 1.0) {
+        m_rate /= 2.0;
+        m_clockBase = m_pos;
+        m_clock.restart();
+        sync(true);
+        return;
+    }
+    seek(m_pos - 5 * kUsPerSecond);
+}
+
 void TimelinePlayer::tick()
 {
-    m_pos = m_clockBase + m_clock.nsecsElapsed() / 1000;
-    const TimeUs dur = m_project->data().duration();
+    m_pos = m_clockBase + TimeUs(double(m_clock.nsecsElapsed() / 1000) * m_rate);
+    const ProjectData &d = m_project->data();
+    const TimeUs dur = d.duration();
+    if (m_loop) {
+        const TimeUs from = d.inPoint >= 0 ? std::min(d.inPoint, dur) : 0;
+        const TimeUs to = d.outPoint > from ? std::min(d.outPoint, dur) : dur;
+        if (to > from && (m_pos >= to || m_pos < from - kUsPerSecond / 10)) {
+            seek(from);
+            return;
+        }
+    }
     if (m_pos >= dur) {
         m_pos = dur;
         pause();
@@ -263,7 +303,7 @@ bool TimelinePlayer::prepareLayer(ViewLayer &layer, Lane &lane, const Clip &clip
     TimeUs src = clip.sourceAt(at);
     if (media->duration > 0)
         src = std::min(src, media->duration - 40 * kUsPerMs);
-    driveLane(lane, media->path, usToMs(std::max<TimeUs>(0, src)), forceSeek, clip.speed);
+    driveLane(lane, media->path, usToMs(std::max<TimeUs>(0, src)), forceSeek, clip.speed * (m_playing ? m_rate : 1.0));
     return true;
 }
 
@@ -349,12 +389,12 @@ void TimelinePlayer::syncAudio(bool forceSeek)
         if (!m_playing) {
             // Silent while paused, but keep the source loaded for a fast start.
             if (lane.source != media->path)
-                driveLane(lane, media->path, usToMs(clip->sourceAt(m_pos)), true, clip->speed);
+                driveLane(lane, media->path, usToMs(clip->sourceAt(m_pos)), true, clip->speed * (m_playing ? m_rate : 1.0));
             else if (lane.player->playbackState() == QMediaPlayer::PlayingState)
                 lane.player->pause();
             continue;
         }
-        driveLane(lane, media->path, usToMs(clip->sourceAt(m_pos)), forceSeek, clip->speed);
+        driveLane(lane, media->path, usToMs(clip->sourceAt(m_pos)), forceSeek, clip->speed * (m_playing ? m_rate : 1.0));
     }
 }
 

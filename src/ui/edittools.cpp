@@ -1,8 +1,10 @@
 #include "ui/edittools.h"
 
 #include "core/analysis.h"
+#include "core/beats.h"
 #include "core/designrender.h"
 #include "core/exporter.h"
+#include "core/exportpreset.h"
 #include "core/looks.h"
 #include "core/project.h"
 #include "core/timelineops.h"
@@ -14,6 +16,8 @@
 #include "ui/timelinewidget.h"
 
 #include <QAudioDevice>
+#include <QApplication>
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QPainter>
@@ -40,6 +44,7 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QProgressDialog>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QSettings>
 #include <QSpinBox>
@@ -515,6 +520,9 @@ void EditTools::addBeatMarkers()
         }
     });
     form->addRow(tr("Tap tempo"), tap);
+    auto *detect = new QPushButton(tr("Detect from Selected Clip"), &dlg);
+    detect->setToolTip(tr("Analyse the selected music clip to find its tempo and first beat"));
+    form->addRow(tr("Auto"), detect);
     auto *offset = new QDoubleSpinBox(&dlg);
     offset->setRange(0, 36000);
     offset->setDecimals(3);
@@ -522,6 +530,15 @@ void EditTools::addBeatMarkers()
     offset->setValue(usToSeconds(m_player->position()));
     offset->setToolTip(tr("Time of a downbeat (defaults to the playhead)"));
     form->addRow(tr("First beat at"), offset);
+    connect(detect, &QPushButton::clicked, &dlg, [this, bpm, offset, detect] {
+        double b = 0, conf = 0;
+        TimeUs first = 0;
+        if (detectTempoOf(targetClip(), &b, &first, &conf)) {
+            bpm->setValue(b);
+            offset->setValue(usToSeconds(first));
+            detect->setText(tr("Detected %1 BPM (%2% sure)").arg(b, 0, 'f', 1).arg(int(conf * 100)));
+        }
+    });
     auto *perBar = new QSpinBox(&dlg);
     perBar->setRange(1, 12);
     perBar->setValue(4);
@@ -791,6 +808,486 @@ void EditTools::autoReframe()
                     .arg(frame.width())
                     .arg(frame.height()));
     Q_UNUSED(seq)
+}
+
+// ---------------------------------------------------------------------------
+// Premiere-style trims and edits
+
+QVector<QUuid> EditTools::targetClips() const
+{
+    if (TimelineWidget *tl = timeline()) {
+        if (!tl->selection().isEmpty())
+            return tl->selection();
+    }
+    const QUuid id = targetClip();
+    return id.isNull() ? QVector<QUuid>() : QVector<QUuid>{id};
+}
+
+QUuid EditTools::clipUnderPlayhead() const
+{
+    const ProjectData &d = m_project->data();
+    const TimeUs at = m_player->position();
+    if (TimelineWidget *tl = timeline()) {
+        for (const auto &id : tl->selection()) {
+            const Clip *c = d.clipById(id);
+            if (c && c->start < at && c->end() > at)
+                return id;
+        }
+        const int ti = tl->currentTrack();
+        if (ti >= 0 && ti < d.tracks.size()) {
+            const int ci = timeline::clipIndexAt(d.tracks[ti], at);
+            if (ci >= 0)
+                return d.tracks[ti].clips[ci].id;
+        }
+    }
+    if (const Clip *c = timeline::topVideoClipAt(d, at))
+        return c->id;
+    for (const Track &t : d.tracks) {
+        const int ci = timeline::clipIndexAt(t, at);
+        if (ci >= 0)
+            return t.clips[ci].id;
+    }
+    return {};
+}
+
+void EditTools::rippleTrimAt(bool head)
+{
+    const QUuid id = clipUnderPlayhead();
+    if (id.isNull()) {
+        emit status(tr("Put the playhead over a clip to ripple trim it."));
+        return;
+    }
+    const TimeUs at = m_player->position();
+    bool ok = false;
+    m_project->edit(head ? tr("Ripple Trim Start") : tr("Ripple Trim End"),
+                    [&](ProjectData &d) { ok = timeline::rippleTrim(d, id, at, head); });
+    if (!ok) {
+        emit status(tr("Nothing to trim here."));
+        return;
+    }
+    // Q leaves the playhead on the clip's new head, which moved to where
+    // the clip used to start.
+    if (head) {
+        if (const Clip *c = m_project->data().clipById(id))
+            m_player->seek(c->start);
+    }
+}
+
+void EditTools::rippleTrimHead()
+{
+    rippleTrimAt(true);
+}
+
+void EditTools::rippleTrimTail()
+{
+    rippleTrimAt(false);
+}
+
+void EditTools::nudge(int frames)
+{
+    TimelineWidget *tl = timeline();
+    const QVector<QUuid> ids = tl ? tl->selection() : QVector<QUuid>();
+    if (ids.isEmpty()) {
+        emit status(tr("Select clips to nudge them."));
+        return;
+    }
+    const double fps = std::max(1.0, m_project->data().sequence.frameRate);
+    const TimeUs delta = TimeUs(std::llround(frames * double(kUsPerSecond) / fps));
+    m_project->edit(tr("Nudge"), [&](ProjectData &d) { timeline::nudgeClips(d, ids, delta); },
+                    QStringLiteral("nudge"));
+}
+
+void EditTools::toggleEnabled()
+{
+    const QVector<QUuid> ids = targetClips();
+    const Clip *first = ids.isEmpty() ? nullptr : m_project->data().clipById(ids.first());
+    if (!first)
+        return;
+    const bool on = !first->enabled;
+    m_project->edit(on ? tr("Enable Clips") : tr("Disable Clips"), [&](ProjectData &d) {
+        for (const QUuid &id : ids) {
+            for (const QUuid &g : timeline::groupOf(d, id)) {
+                if (Clip *c = d.clipById(g))
+                    c->enabled = on;
+            }
+        }
+    });
+    emit status(on ? tr("Clip enabled.") : tr("Clip disabled — hidden, silent and left out of the export."));
+}
+
+void EditTools::setLabel(int label)
+{
+    const QVector<QUuid> ids = targetClips();
+    if (ids.isEmpty())
+        return;
+    m_project->edit(tr("Label Clips"), [&](ProjectData &d) {
+        for (const QUuid &id : ids) {
+            if (Clip *c = d.clipById(id))
+                c->colorLabel = label;
+        }
+    });
+}
+
+void EditTools::replaceWithBinMedia()
+{
+    const QUuid media = m_bin->currentMedia();
+    const QUuid id = targetClip();
+    if (media.isNull() || id.isNull()) {
+        emit status(tr("Select a clip on the timeline and the replacement in the Media Bin."));
+        return;
+    }
+    bool ok = false;
+    m_project->edit(tr("Replace Clip"), [&](ProjectData &d) { ok = timeline::replaceClipMedia(d, id, media); });
+    emit status(ok ? tr("Clip replaced — position, length and effects kept.")
+                   : tr("That media can't go on this clip's track."));
+}
+
+void EditTools::copyAttributes()
+{
+    const Clip *c = m_project->data().clipById(targetClip());
+    if (!c) {
+        emit status(tr("Select a clip to copy its attributes."));
+        return;
+    }
+    m_attributes = *c;
+    m_hasAttributes = true;
+    emit status(tr("Attributes copied. Select other clips and choose Paste Attributes."));
+}
+
+void EditTools::pasteAttributes()
+{
+    if (!m_hasAttributes) {
+        emit status(tr("Copy a clip's attributes first (Edit ▸ Copy Attributes)."));
+        return;
+    }
+    const QVector<QUuid> ids = targetClips();
+    if (ids.isEmpty())
+        return;
+    QDialog dlg(m_window);
+    dlg.setWindowTitle(tr("Paste Attributes"));
+    auto *form = new QFormLayout(&dlg);
+    QSettings s;
+    auto check = [&](const QString &text, const QString &key, bool def) {
+        auto *cb = new QCheckBox(text, &dlg);
+        cb->setChecked(s.value(QStringLiteral("attributes/") + key, def).toBool());
+        form->addRow(cb);
+        return cb;
+    };
+    auto *color = check(tr("Color and look"), QStringLiteral("color"), true);
+    auto *transform = check(tr("Transform, crop and motion"), QStringLiteral("transform"), true);
+    auto *effects = check(tr("Effects, chroma key and stabilize"), QStringLiteral("effects"), true);
+    auto *audio = check(tr("Audio gain and fades"), QStringLiteral("audio"), true);
+    auto *speed = check(tr("Speed"), QStringLiteral("speed"), false);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    timeline::AttributeSet what;
+    what.color = color->isChecked();
+    what.transform = transform->isChecked();
+    what.effects = effects->isChecked();
+    what.audio = audio->isChecked();
+    what.speed = speed->isChecked();
+    s.setValue(QStringLiteral("attributes/color"), what.color);
+    s.setValue(QStringLiteral("attributes/transform"), what.transform);
+    s.setValue(QStringLiteral("attributes/effects"), what.effects);
+    s.setValue(QStringLiteral("attributes/audio"), what.audio);
+    s.setValue(QStringLiteral("attributes/speed"), what.speed);
+    int n = 0;
+    m_project->edit(tr("Paste Attributes"), [&](ProjectData &d) { n = timeline::pasteAttributes(d, ids, m_attributes, what); });
+    emit status(tr("Pasted attributes onto %n clip(s).", nullptr, n));
+}
+
+void EditTools::quickFades()
+{
+    const QVector<QUuid> ids = targetClips();
+    if (ids.isEmpty()) {
+        emit status(tr("Select clips to fade."));
+        return;
+    }
+    const TimeUs len = secondsToUs(QSettings().value(QStringLiteral("fades/quick"), 0.5).toDouble());
+    int n = 0;
+    m_project->edit(tr("Quick Fades"), [&](ProjectData &d) { n = timeline::applyQuickFades(d, ids, len); });
+    emit status(tr("Faded %n clip(s) in and out.", nullptr, n));
+}
+
+void EditTools::liftInOut()
+{
+    const ProjectData &d = m_project->data();
+    if (!d.hasRange()) {
+        emit status(tr("Mark an In point (I) and an Out point (O) first."));
+        return;
+    }
+    const TimeUs from = d.inPoint, to = d.outPoint;
+    m_project->edit(tr("Lift"), [&](ProjectData &pd) { timeline::liftRange(pd, from, to); });
+}
+
+void EditTools::extractInOut()
+{
+    const ProjectData &d = m_project->data();
+    if (!d.hasRange()) {
+        emit status(tr("Mark an In point (I) and an Out point (O) first."));
+        return;
+    }
+    const TimeUs from = d.inPoint, to = d.outPoint;
+    m_project->edit(tr("Extract"), [&](ProjectData &pd) {
+        timeline::rippleDeleteRange(pd, from, to);
+        pd.inPoint = pd.outPoint = -1;
+    });
+    m_player->seek(from);
+}
+
+// ---------------------------------------------------------------------------
+// Analysis and delivery
+
+bool EditTools::detectTempoOf(const QUuid &clipId, double *bpm, TimeUs *firstBeat, double *confidence)
+{
+    const ProjectData &d = m_project->data();
+    const Clip *c = d.clipById(clipId);
+    const MediaItem *m = c ? d.mediaById(c->mediaId) : nullptr;
+    if (!c || !m || !m->hasAudio) {
+        QMessageBox::information(m_window, tr("Detect Tempo"), tr("Select a music clip on the timeline first."));
+        return false;
+    }
+    const Clip clip = *c;
+    // A couple of minutes is plenty to lock onto a tempo.
+    const TimeUs len = std::min(clip.sourceDuration(), 120 * kUsPerSecond);
+    QString log;
+    if (!runAnalysis(m_window, tr("Listening for the beat…"), beats::analysisArgs(m->path, clip.in, len), &log))
+        return false;
+    const beats::Tempo t = beats::estimateTempo(beats::parseEnvelope(log));
+    if (t.bpm <= 0) {
+        QMessageBox::information(m_window, tr("Detect Tempo"),
+                                 tr("No steady beat found in “%1”. Use Tap tempo instead.").arg(m->name));
+        return false;
+    }
+    // The detected tempo is in source time; speed changes scale it.
+    *bpm = t.bpm * clip.speed;
+    *firstBeat = clip.start + clip.toTimeline(secondsToUs(t.firstBeat));
+    *confidence = t.confidence;
+    return true;
+}
+
+void EditTools::detectTempo()
+{
+    double bpm = 0, conf = 0;
+    TimeUs first = 0;
+    if (!detectTempoOf(targetClip(), &bpm, &first, &conf))
+        return;
+    const auto answer = QMessageBox::question(
+        m_window, tr("Detect Tempo"),
+        tr("Tempo: %1 BPM (%2% confidence), first beat at %3.\n\nAdd a marker on every bar?")
+            .arg(bpm, 0, 'f', 1)
+            .arg(int(conf * 100))
+            .arg(formatTimecode(first, m_project->data().sequence.frameRate)));
+    QSettings().setValue(QStringLiteral("beats/bpm"), bpm);
+    if (answer != QMessageBox::Yes) {
+        emit status(tr("Tempo: %1 BPM.").arg(bpm, 0, 'f', 1));
+        return;
+    }
+    const Clip *c = m_project->data().clipById(targetClip());
+    const TimeUs from = c ? c->start : 0;
+    const TimeUs to = c ? c->end() : m_project->data().duration();
+    int n = 0;
+    m_project->edit(tr("Beat Markers"),
+                    [&](ProjectData &d) { n = timeline::addBeatMarkers(d, bpm, first, from, to, 4, true); });
+    emit status(tr("%1 BPM — added %n bar marker(s).", nullptr, n).arg(bpm, 0, 'f', 1));
+}
+
+void EditTools::loudnessReport()
+{
+    QString err;
+    const QStringList args = Exporter::loudnessArguments(m_project->data(), &err);
+    if (args.isEmpty()) {
+        QMessageBox::warning(m_window, tr("Loudness"), err);
+        return;
+    }
+    QString log;
+    if (!runAnalysis(m_window, tr("Measuring loudness of the mix…"), args, &log))
+        return;
+    const Exporter::Loudness l = Exporter::parseLoudness(log);
+    if (!l.ok) {
+        QMessageBox::warning(m_window, tr("Loudness"), tr("Could not measure the mix."));
+        return;
+    }
+    auto verdict = [&](double target, const QString &where) {
+        const double diff = l.integrated - target;
+        const QString state = std::abs(diff) <= 1.0 ? tr("on target")
+                              : diff > 0 ? tr("%1 LU too loud").arg(diff, 0, 'f', 1)
+                                         : tr("%1 LU too quiet").arg(-diff, 0, 'f', 1);
+        return QStringLiteral("<tr><td>%1</td><td align=right>%2 LUFS</td><td>&nbsp;%3</td></tr>")
+            .arg(where)
+            .arg(target, 0, 'f', 0)
+            .arg(state);
+    };
+    const QString html =
+        tr("<h3>Mix loudness</h3>"
+           "<table><tr><td>Integrated</td><td align=right><b>%1 LUFS</b></td></tr>"
+           "<tr><td>Loudness range</td><td align=right>%2 LU</td></tr>"
+           "<tr><td>True peak</td><td align=right>%3 dBTP</td></tr></table>"
+           "<h4>Targets</h4><table>%4%5%6</table>"
+           "<p>%7</p>")
+            .arg(l.integrated, 0, 'f', 1)
+            .arg(l.range, 0, 'f', 1)
+            .arg(l.truePeak, 0, 'f', 1)
+            .arg(verdict(-14, tr("YouTube / Spotify")), verdict(-16, tr("Podcasts / Apple")),
+                 verdict(-23, tr("Broadcast (EBU R128)")))
+            .arg(l.truePeak > -1.0 ? tr("⚠ True peak above −1 dBTP: turn on the master limiter or a loudness "
+                                         "target in the export preset to avoid clipping.")
+                                   : tr("Peaks are safe."));
+    QMessageBox box(QMessageBox::Information, tr("Loudness"), html, QMessageBox::Ok, m_window);
+    box.setTextFormat(Qt::RichText);
+    box.exec();
+}
+
+void EditTools::youtubeChapters()
+{
+    QStringList warnings;
+    const QString text = timeline::youtubeChapters(m_project->data(), &warnings);
+    if (text.isEmpty()) {
+        QMessageBox::information(m_window, tr("YouTube Chapters"),
+                                 tr("Add markers (M) where each chapter starts, then name them by double-clicking "
+                                    "the marker."));
+        return;
+    }
+    QDialog dlg(m_window);
+    dlg.setWindowTitle(tr("YouTube Chapters"));
+    dlg.resize(460, 380);
+    auto *v = new QVBoxLayout(&dlg);
+    auto *info = new QLabel(tr("Paste this into your video description:"), &dlg);
+    v->addWidget(info);
+    auto *edit = new QPlainTextEdit(text, &dlg);
+    edit->setReadOnly(true);
+    v->addWidget(edit, 1);
+    if (!warnings.isEmpty()) {
+        auto *warn = new QLabel(QStringLiteral("⚠ ") + warnings.join(QStringLiteral("\n⚠ ")), &dlg);
+        warn->setWordWrap(true);
+        warn->setStyleSheet(QStringLiteral("color: #ffc400;"));
+        v->addWidget(warn);
+    }
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+    auto *copy = buttons->addButton(tr("Copy"), QDialogButtonBox::ActionRole);
+    v->addWidget(buttons);
+    connect(copy, &QPushButton::clicked, &dlg, [&] {
+        QApplication::clipboard()->setText(text);
+        copy->setText(tr("Copied ✓"));
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    dlg.exec();
+}
+
+void EditTools::exportStems()
+{
+    const ProjectData &d = m_project->data();
+    QVector<int> tracks;
+    for (int i : d.audioTrackIndices()) {
+        if (!d.tracks[i].clips.isEmpty())
+            tracks.append(i);
+    }
+    if (tracks.isEmpty()) {
+        QMessageBox::information(m_window, tr("Export Stems"), tr("There are no clips on the audio tracks."));
+        return;
+    }
+    const QString dir = QFileDialog::getExistingDirectory(m_window, tr("Export Stems To"),
+                                                          QStandardPaths::writableLocation(QStandardPaths::MusicLocation));
+    if (dir.isEmpty())
+        return;
+    ExportPreset wav;
+    for (const ExportPreset &p : builtInExportPresets()) {
+        if (p.container == QLatin1String("wav"))
+            wav = p;
+    }
+    wav.loudnessLufs = 0; // stems keep their level relative to the mix
+    const QString base = m_project->filePath().isEmpty() ? tr("Untitled") : QFileInfo(m_project->filePath()).completeBaseName();
+    int done = 0;
+    for (int ti : tracks) {
+        // Only this track sounds: everything else muted, solos cleared.
+        ProjectData solo = d;
+        for (int j = 0; j < solo.tracks.size(); ++j) {
+            solo.tracks[j].solo = false;
+            if (solo.tracks[j].isAudio())
+                solo.tracks[j].muted = j != ti;
+        }
+        // Video clips' own sound comes in through linked audio clips, so the
+        // video tracks can stay as they are (an audio-only render ignores them).
+        QString name = solo.tracks[ti].name;
+        name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9 _-]")), QStringLiteral("_"));
+        const QString out = QDir(dir).filePath(QStringLiteral("%1 - %2.wav").arg(base, name));
+        QString err;
+        const QStringList args = Exporter::buildArguments(solo, wav, out, &err);
+        if (args.isEmpty() || !runFfmpeg(m_window, tr("Exporting stem “%1”…").arg(solo.tracks[ti].name), args, &err)) {
+            if (err != tr("Cancelled."))
+                QMessageBox::warning(m_window, tr("Export Stems"), err);
+            return;
+        }
+        ++done;
+    }
+    emit status(tr("Exported %n stem(s) to %1.", nullptr, done).arg(QDir::toNativeSeparators(dir)));
+}
+
+void EditTools::collectFiles()
+{
+    const QString dir = QFileDialog::getExistingDirectory(m_window, tr("Collect Project Files Into"));
+    if (dir.isEmpty())
+        return;
+    const QString mediaDir = QDir(dir).filePath(QStringLiteral("Media"));
+    const QVector<timeline::CopyPlan> plan = timeline::collectPlan(m_project->data(), mediaDir);
+    QDir().mkpath(mediaDir);
+    QProgressDialog progress(tr("Copying media…"), tr("Cancel"), 0, int(plan.size()), m_window);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(200);
+    QHash<QUuid, QString> moved;
+    int failed = 0;
+    for (int i = 0; i < plan.size(); ++i) {
+        progress.setValue(i);
+        progress.setLabelText(tr("Copying %1…").arg(QFileInfo(plan[i].from).fileName()));
+        QCoreApplication::processEvents();
+        if (progress.wasCanceled())
+            return;
+        if (QFileInfo(plan[i].from) == QFileInfo(plan[i].to) || QFile::exists(plan[i].to)
+            || QFile::copy(plan[i].from, plan[i].to))
+            moved.insert(plan[i].mediaId, plan[i].to);
+        else
+            ++failed;
+    }
+    progress.setValue(int(plan.size()));
+    m_project->edit(tr("Collect Files"), [&](ProjectData &d) {
+        for (MediaItem &m : d.media) {
+            if (moved.contains(m.id))
+                m.path = moved.value(m.id);
+        }
+    });
+    const QString name = m_project->filePath().isEmpty() ? tr("Project")
+                                                         : QFileInfo(m_project->filePath()).completeBaseName();
+    QString err;
+    const QString projectPath = QDir(dir).filePath(name + QStringLiteral(".spotlight"));
+    if (!m_project->saveAs(projectPath, &err)) {
+        QMessageBox::warning(m_window, tr("Collect Files"), err);
+        return;
+    }
+    emit status(failed ? tr("Collected into %1 — %n file(s) could not be copied.", nullptr, failed).arg(dir)
+                       : tr("Project and %n media file(s) collected into %1.", nullptr, int(moved.size())).arg(dir));
+}
+
+void EditTools::removeUnusedMedia()
+{
+    const QVector<QUuid> unused = timeline::unusedMedia(m_project->data());
+    if (unused.isEmpty()) {
+        emit status(tr("Every item in the Media Bin is used on the timeline."));
+        return;
+    }
+    if (QMessageBox::question(m_window, tr("Remove Unused Media"),
+                              tr("Remove %n item(s) that no clip uses from the Media Bin? (Files on disk are kept.)",
+                                 nullptr, int(unused.size())))
+        != QMessageBox::Yes)
+        return;
+    m_project->edit(tr("Remove Unused Media"), [&](ProjectData &d) {
+        for (const QUuid &id : unused)
+            timeline::removeMedia(d, id);
+    });
+    emit status(tr("Removed %n unused item(s).", nullptr, int(unused.size())));
 }
 
 } // namespace spotlight

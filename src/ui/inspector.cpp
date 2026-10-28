@@ -12,6 +12,9 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSlider>
@@ -69,6 +72,52 @@ ClipInspector::ClipInspector(Project *project, QWidget *parent)
     m_info->setWordWrap(true);
     layout->addWidget(m_title);
     layout->addWidget(m_info);
+
+    // Name, colour label and enabled state apply to every clip.
+    m_clipRow = new QWidget(this);
+    auto *row = new QHBoxLayout(m_clipRow);
+    row->setContentsMargins(0, 0, 0, 0);
+    m_name = new QLineEdit(m_clipRow);
+    m_name->setPlaceholderText(tr("Clip name"));
+    m_name->setToolTip(tr("Name shown on the timeline (empty = media name)"));
+    m_label = new QComboBox(m_clipRow);
+    m_label->setToolTip(tr("Color label"));
+    const QStringList labelNames = {tr("No label"), tr("Red"),  tr("Orange"), tr("Yellow"), tr("Green"),
+                                    tr("Cyan"),     tr("Blue"), tr("Purple"), tr("Pink")};
+    const QVector<QColor> labelColors = clipLabelColors();
+    for (int i = 0; i < labelColors.size(); ++i) {
+        QPixmap swatch(12, 12);
+        swatch.fill(Qt::transparent);
+        if (labelColors[i].isValid()) {
+            QPainter sp(&swatch);
+            sp.setRenderHint(QPainter::Antialiasing);
+            sp.setBrush(labelColors[i]);
+            sp.setPen(Qt::NoPen);
+            sp.drawEllipse(1, 1, 10, 10);
+        }
+        m_label->addItem(QIcon(swatch), labelNames.value(i));
+    }
+    m_enabled = new QCheckBox(tr("Enabled"), m_clipRow);
+    m_enabled->setToolTip(tr("Disabled clips are hidden, silent and left out of the export (Shift+E)"));
+    row->addWidget(m_name, 1);
+    row->addWidget(m_label);
+    row->addWidget(m_enabled);
+    layout->addWidget(m_clipRow);
+    connect(m_name, &QLineEdit::editingFinished, this, [this] {
+        const QString n = m_name->text().trimmed();
+        editClip(QStringLiteral("name"), [&](Clip &c) { c.name = n; });
+    });
+    connect(m_label, &QComboBox::activated, this,
+            [this](int i) { editClip(QStringLiteral("label"), [&](Clip &c) { c.colorLabel = i; }); });
+    connect(m_enabled, &QCheckBox::toggled, this,
+            [this](bool on) { editClip(QStringLiteral("enabled"), [&](Clip &c) { c.enabled = on; }); });
+    m_refreshers << [this](const Clip &c) {
+        if (!m_name->hasFocus())
+            m_name->setText(c.name);
+        m_label->setCurrentIndex(std::clamp(c.colorLabel, 0, m_label->count() - 1));
+        m_enabled->setChecked(c.enabled);
+    };
+
     layout->addWidget(m_tabs, 1);
     m_tabs->setDocumentMode(true);
 
@@ -266,8 +315,10 @@ QWidget *ClipInspector::buildVideoTab()
     auto *mo = section(page, tr("Motion"));
     auto *motion = new QComboBox;
     motion->addItems(motionNames());
-    motion->setToolTip(tr("Ken Burns: a slow zoom or pan across the clip"));
-    mo->addRow(tr("Ken Burns"), motion);
+    motion->setToolTip(tr("Ken Burns: a slow zoom or pan across the clip.\n"
+                          "Slide / Pop: an animated entrance over the first %1 s.")
+                           .arg(kEntranceSeconds));
+    mo->addRow(tr("Animation"), motion);
     connect(motion, &QComboBox::activated, this,
             [this](int i) { editClip(QStringLiteral("motion"), [&](Clip &c) { c.motion = Motion(i); }); });
     m_refreshers << [motion](const Clip &c) { motion->setCurrentIndex(int(c.motion)); };
@@ -318,6 +369,10 @@ QWidget *ClipInspector::buildColorTab()
               [](Clip &c, double v) { c.color.temperature = v; });
     addSlider(basic, tr("Tint"), -100, 100, 0.01, [](const Clip &c) { return c.color.tint; },
               [](Clip &c, double v) { c.color.tint = v; });
+    addSlider(basic, tr("Hue"), -180, 180, 1, [](const Clip &c) { return c.color.hue; },
+              [](Clip &c, double v) { c.color.hue = v; }, QStringLiteral("°"));
+    addSlider(basic, tr("Gamma"), 20, 300, 0.01, [](const Clip &c) { return c.color.gamma; },
+              [](Clip &c, double v) { c.color.gamma = v; });
 
     auto *fx = section(page, tr("Creative"));
     auto *mono = new QComboBox;
@@ -386,6 +441,41 @@ QWidget *ClipInspector::buildEffectsTab()
     addSpin(fades, tr("Fade out"), 0, 30, 0.25, 2, QStringLiteral(" s"),
             [](const Clip &c) { return usToSeconds(c.fadeOut); },
             [](Clip &c, double v) { c.fadeOut = std::min(secondsToUs(v), c.duration() - c.fadeIn); });
+
+    auto *style = section(page, tr("Stylize"));
+    addSlider(style, tr("Sharpen"), 0, 100, 0.01, [](const Clip &c) { return c.fx.sharpen; },
+              [](Clip &c, double v) { c.fx.sharpen = v; });
+    addSlider(style, tr("Film grain"), 0, 100, 0.01, [](const Clip &c) { return c.fx.grain; },
+              [](Clip &c, double v) { c.fx.grain = v; });
+    addSlider(style, tr("Pixelate"), 0, 100, 0.01, [](const Clip &c) { return c.fx.pixelate; },
+              [](Clip &c, double v) { c.fx.pixelate = v; });
+    addCheck(style, tr("Invert colors"), [](const Clip &c) { return c.fx.invert; },
+             [](Clip &c, bool on) { c.fx.invert = on; });
+    addCheck(style, tr("Cinema bars (2.39:1)"), [](const Clip &c) { return c.fx.cinemaBars; },
+             [](Clip &c, bool on) { c.fx.cinemaBars = on; });
+
+    auto *frame = section(page, tr("Background && Border"));
+    addCheck(frame, tr("Blur fill (blurred copy behind the picture)"), [](const Clip &c) { return c.fx.blurFill; },
+             [](Clip &c, bool on) { c.fx.blurFill = on; });
+    addSlider(frame, tr("Border"), 0, 100, 0.001, [](const Clip &c) { return c.fx.border; },
+              [](Clip &c, double v) { c.fx.border = v; });
+    m_borderColor = new QPushButton;
+    frame->addRow(tr("Border color"), m_borderColor);
+    connect(m_borderColor, &QPushButton::clicked, this, [this] {
+        const Clip *c = m_project->data().clipById(m_clip);
+        if (!c)
+            return;
+        const QColor col = QColorDialog::getColor(c->fx.borderColor, this, tr("Border Color"));
+        if (col.isValid())
+            editClip(QStringLiteral("borderColor"), [&](Clip &cl) { cl.fx.borderColor = col; });
+    });
+    m_refreshers << [this](const Clip &c) {
+        m_borderColor->setStyleSheet(QStringLiteral("background: %1; min-height: 18px;").arg(c.fx.borderColor.name()));
+    };
+    auto *resetFx = new QPushButton(tr("Reset Effects"));
+    frame->addRow(resetFx);
+    connect(resetFx, &QPushButton::clicked, this,
+            [this] { editClip(QStringLiteral("resetFx"), [](Clip &c) { c.fx = ClipFx(); }); });
 
     auto *key = section(page, tr("Chroma Key (Green Screen)"));
     addCheck(key, tr("Remove background color"), [](const Clip &c) { return c.key.enabled; },
@@ -483,12 +573,13 @@ void ClipInspector::refresh()
         m_title->setText(tr("No clip selected"));
         m_info->setText(tr("Select a clip on the timeline to adjust it."));
         m_tabs->setVisible(false);
+        m_clipRow->setVisible(false);
         return;
     }
     const ProjectData &d = m_project->data();
     const Track &t = d.tracks[ti];
     const MediaItem *m = d.mediaById(c->mediaId);
-    m_title->setText(m ? m->name : tr("Clip"));
+    m_title->setText(!c->name.isEmpty() ? c->name : (m ? m->name : tr("Clip")));
     QString info = tr("%1 · starts %2 · length %3")
                        .arg(t.name, formatTimecode(c->start, d.sequence.frameRate), formatDuration(c->duration()));
     if (!qFuzzyCompare(c->speed, 1.0))
@@ -518,6 +609,7 @@ void ClipInspector::refresh()
         }
     }
     m_tabs->setVisible(true);
+    m_clipRow->setVisible(true);
 
     m_updating = true;
     for (const auto &r : m_refreshers)

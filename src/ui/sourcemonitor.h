@@ -25,6 +25,8 @@ public:
     // Loads the item with in/out marks set to [in, out) and parks the
     // playhead on the in-point (used to preview Auto-Clip highlights).
     void loadRange(const MediaItem &item, TimeUs in, TimeUs out);
+    // Match frame: loads the item with [in, out) marked, parked on `at`.
+    void loadAt(const MediaItem &item, TimeUs in, TimeUs out, TimeUs at);
     QUuid mediaId() const { return m_item.id; }
     QImage currentFrame() const;
 

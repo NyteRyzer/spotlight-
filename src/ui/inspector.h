@@ -12,6 +12,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QSlider;
 class QTabWidget;
@@ -25,7 +26,8 @@ class Project;
 //            Ken Burns motion, stabilization, freeze frame, reverse
 //  Color   — one-click looks plus brightness/contrast/saturation,
 //            temperature, tint, black & white / sepia, vignette, blur
-//  Effects — chroma key, transition in, fades
+//  Effects — transition in, fades, stylize (sharpen, grain, pixelate,
+//            invert, cinema bars), blur fill and border, chroma key
 //  Audio   — clip gain, normalize, speed, fades
 class ClipInspector : public QWidget {
     Q_OBJECT
@@ -75,6 +77,11 @@ private:
     QComboBox *m_look = nullptr;
     QComboBox *m_transition = nullptr;
     QPushButton *m_keyColor = nullptr;
+    QPushButton *m_borderColor = nullptr;
+    QLineEdit *m_name = nullptr;
+    QComboBox *m_label = nullptr;
+    QCheckBox *m_enabled = nullptr;
+    QWidget *m_clipRow = nullptr;
     QPushButton *m_editTitle = nullptr;
     QLabel *m_transitionHint = nullptr;
     QVector<std::function<void(const Clip &)>> m_refreshers;

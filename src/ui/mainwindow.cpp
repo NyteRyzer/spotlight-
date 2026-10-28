@@ -10,6 +10,7 @@
 #include "ui/audiostudio.h"
 #include "ui/designstudio.h"
 #include "ui/autoclip.h"
+#include "ui/commandpalette.h"
 #include "ui/edittools.h"
 #include "ui/sourcemonitor.h"
 #include "ui/inspector.h"
@@ -36,6 +37,8 @@
 #include <QLineEdit>
 #include <QDateTime>
 #include <QDir>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -222,6 +225,39 @@ void MainWindow::buildMenus()
     auto *relinkAct = makeAction(this, QStringLiteral("file.relink"), F, tr("Re&link Missing Media..."));
     connect(relinkAct, &QAction::triggered, this, &MainWindow::relinkMedia);
     file->addAction(relinkAct);
+    QMenu *deliver = file->addMenu(tr("Deli&ver"));
+    auto addF = [&](QMenu *menu, const QString &id, const QString &text, const QKeySequence &key, auto fn) {
+        auto *a = makeAction(this, id, F, text, key);
+        connect(a, &QAction::triggered, this, fn);
+        menu->addAction(a);
+        return a;
+    };
+    addF(deliver, QStringLiteral("file.chapters"), tr("YouTube Chapters from Markers..."), QKeySequence(),
+         [this] { m_tools->youtubeChapters(); });
+    addF(deliver, QStringLiteral("file.stems"), tr("Export Audio Stems..."), QKeySequence(), [this] {
+        m_video->programMonitor()->player()->pause();
+        m_tools->exportStems();
+    });
+    addF(deliver, QStringLiteral("file.loudness"), tr("Analyze Mix Loudness..."), QKeySequence(), [this] {
+        m_video->programMonitor()->player()->pause();
+        m_tools->loudnessReport();
+    });
+    addF(file, QStringLiteral("file.collect"), tr("Collect Files and Save..."), QKeySequence(),
+         [this] { m_tools->collectFiles(); });
+    addF(file, QStringLiteral("file.removeunused"), tr("Remove Unused Media"), QKeySequence(),
+         [this] { m_tools->removeUnusedMedia(); });
+    addF(file, QStringLiteral("file.backups"), tr("Show Backups Folder"), QKeySequence(), [this] {
+        if (m_project->filePath().isEmpty()) {
+            statusBar()->showMessage(tr("Save the project first — a backup is kept every time you save."), 6000);
+            return;
+        }
+        const QString dir = QFileInfo(m_project->filePath()).dir().filePath(QStringLiteral("Backups"));
+        if (!QDir(dir).exists()) {
+            statusBar()->showMessage(tr("No backups yet: they're made when you save over an existing file."), 6000);
+            return;
+        }
+        QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+    });
     file->addSeparator();
     file->addAction(settingsAct);
     file->addSeparator();
@@ -276,7 +312,33 @@ void MainWindow::buildMenus()
     edit->addAction(copyAct);
     edit->addAction(pasteAct);
     edit->addAction(dupAct);
+    auto addE = [&](const QString &id, const QString &text, const QKeySequence &key, auto fn) {
+        auto *a = makeAction(this, id, E, text, key);
+        connect(a, &QAction::triggered, this, fn);
+        edit->addAction(a);
+        return a;
+    };
+    addE(QStringLiteral("edit.copyattributes"), tr("Copy Attributes"), QKeySequence(tr("Ctrl+Alt+C")),
+         [this] { m_tools->copyAttributes(); });
+    addE(QStringLiteral("edit.pasteattributes"), tr("Paste Attributes..."), QKeySequence(tr("Ctrl+Alt+V")),
+         [this] { m_tools->pasteAttributes(); });
+    addE(QStringLiteral("edit.replace"), tr("Replace Clip with Bin Media"), QKeySequence(),
+         [this] { m_tools->replaceWithBinMedia(); });
+    addE(QStringLiteral("edit.enable"), tr("Enable / Disable Clip"), QKeySequence(tr("Shift+E")),
+         [this] { m_tools->toggleEnabled(); });
+    QMenu *labels = edit->addMenu(tr("Label"));
+    const QStringList labelNames = {tr("None"), tr("Red"),  tr("Orange"), tr("Yellow"), tr("Green"),
+                                    tr("Cyan"), tr("Blue"), tr("Purple"), tr("Pink")};
+    for (int i = 0; i < labelNames.size(); ++i) {
+        QPixmap swatch(12, 12);
+        swatch.fill(i == 0 ? QColor(Qt::transparent) : clipLabelColors()[i]);
+        labels->addAction(QIcon(swatch), labelNames[i], this, [this, i] { m_tools->setLabel(i); });
+    }
     edit->addSeparator();
+    addE(QStringLiteral("edit.palette"), tr("Command Palette..."), QKeySequence(tr("Ctrl+K")), [this] {
+        CommandPalette palette(menuBar(), this);
+        palette.exec();
+    });
     edit->addAction(keys);
     connect(del, &QAction::triggered, this, [this] {
         // Delete acts on whatever panel has focus: the media bin removes
@@ -315,6 +377,106 @@ void MainWindow::buildMenus()
         [player] { player->stepFrames(-1); });
     add(QStringLiteral("timeline.nextframe"), tr("Next Frame"), QKeySequence(Qt::Key_Right),
         [player] { player->stepFrames(1); });
+    add(QStringLiteral("timeline.nextedit"), tr("Next Edit Point"), QKeySequence(Qt::Key_Down), [this, player] {
+        const TimeUs t = timeline::nextEditPoint(m_project->data(), player->position());
+        if (t >= 0)
+            player->seek(t);
+    });
+    add(QStringLiteral("timeline.prevedit"), tr("Previous Edit Point"), QKeySequence(Qt::Key_Up), [this, player] {
+        const TimeUs t = timeline::previousEditPoint(m_project->data(), player->position());
+        if (t >= 0)
+            player->seek(t);
+    });
+    add(QStringLiteral("timeline.gototc"), tr("Go to Timecode..."), QKeySequence(tr("Ctrl+G")), [this, player] {
+        const double fps = m_project->data().sequence.frameRate;
+        bool ok = false;
+        const QString text = QInputDialog::getText(
+            this, tr("Go to Timecode"),
+            tr("Timecode (HH:MM:SS:FF), minutes:seconds, seconds, or +/- frames:"), QLineEdit::Normal,
+            formatTimecode(player->position(), fps), &ok);
+        if (!ok)
+            return;
+        const TimeUs t = parseTimecode(text, fps, player->position());
+        if (t < 0)
+            statusBar()->showMessage(tr("“%1” isn't a time.").arg(text), 5000);
+        else
+            player->seek(t);
+    });
+    QMenu *shuttle = tl->addMenu(tr("Shuttle"));
+    auto addS = [&](const QString &id, const QString &text, const QKeySequence &key, auto fn) {
+        auto *a = makeAction(this, id, T, text, key);
+        connect(a, &QAction::triggered, this, fn);
+        shuttle->addAction(a);
+        return a;
+    };
+    addS(QStringLiteral("timeline.shuttlefwd"), tr("Play / Faster (L)"), QKeySequence(Qt::Key_L), [this, player] {
+        player->shuttleForward();
+        statusBar()->showMessage(tr("Playing at %1×").arg(player->shuttleRate()), 2000);
+    });
+    addS(QStringLiteral("timeline.shuttlestop"), tr("Stop (K)"), QKeySequence(Qt::Key_K), [player] { player->shuttleStop(); });
+    addS(QStringLiteral("timeline.shuttleback"), tr("Back 5 s / Slower (J)"), QKeySequence(Qt::Key_J),
+         [player] { player->shuttleBack(); });
+    auto *loop = makeAction(this, QStringLiteral("timeline.loop"), T, tr("Loop Playback"), QKeySequence(tr("Ctrl+L")));
+    loop->setCheckable(true);
+    loop->setToolTip(tr("Loop the In/Out range (or the whole timeline)"));
+    connect(loop, &QAction::toggled, this, [player](bool on) { player->setLooping(on); });
+    tl->addAction(loop);
+    tl->addSeparator();
+    // In / Out range.
+    QMenu *range = tl->addMenu(tr("In / Out"));
+    auto addR = [&](const QString &id, const QString &text, const QKeySequence &key, auto fn) {
+        auto *a = makeAction(this, id, T, text, key);
+        connect(a, &QAction::triggered, this, fn);
+        range->addAction(a);
+        return a;
+    };
+    addR(QStringLiteral("timeline.markin"), tr("Mark In"), QKeySequence(Qt::Key_I), [this, player] {
+        const TimeUs t = player->position();
+        m_project->edit(tr("Mark In"), [&](ProjectData &d) {
+            d.inPoint = t;
+            if (d.outPoint >= 0 && d.outPoint <= t)
+                d.outPoint = -1;
+        });
+    });
+    addR(QStringLiteral("timeline.markout"), tr("Mark Out"), QKeySequence(Qt::Key_O), [this, player] {
+        const TimeUs t = player->position();
+        m_project->edit(tr("Mark Out"), [&](ProjectData &d) {
+            d.outPoint = t;
+            if (d.inPoint >= t)
+                d.inPoint = -1;
+        });
+    });
+    addR(QStringLiteral("timeline.markclip"), tr("Mark Selected Clip"), QKeySequence(Qt::Key_X), [this] {
+        const auto sel = activeTimeline()->selection();
+        TimeUs from = -1, to = -1;
+        for (const QUuid &id : sel) {
+            if (const Clip *c = m_project->data().clipById(id)) {
+                from = from < 0 ? c->start : std::min(from, c->start);
+                to = std::max(to, c->end());
+            }
+        }
+        if (from >= 0)
+            m_project->edit(tr("Mark Clip"), [&](ProjectData &d) {
+                d.inPoint = from;
+                d.outPoint = to;
+            });
+    });
+    addR(QStringLiteral("timeline.gotoin"), tr("Go to In"), QKeySequence(tr("Shift+I")), [this, player] {
+        if (m_project->data().inPoint >= 0)
+            player->seek(m_project->data().inPoint);
+    });
+    addR(QStringLiteral("timeline.gotoout"), tr("Go to Out"), QKeySequence(tr("Shift+O")), [this, player] {
+        if (m_project->data().outPoint >= 0)
+            player->seek(m_project->data().outPoint);
+    });
+    addR(QStringLiteral("timeline.clearinout"), tr("Clear In and Out"), QKeySequence(tr("Ctrl+Shift+X")), [this] {
+        m_project->edit(tr("Clear In/Out"), [](ProjectData &d) { d.inPoint = d.outPoint = -1; });
+    });
+    range->addSeparator();
+    addR(QStringLiteral("timeline.lift"), tr("Lift (leave gap)"), QKeySequence(Qt::Key_Semicolon),
+         [this] { m_tools->liftInOut(); });
+    addR(QStringLiteral("timeline.extract"), tr("Extract (ripple)"), QKeySequence(Qt::Key_Apostrophe),
+         [this] { m_tools->extractInOut(); });
     tl->addSeparator();
     add(QStringLiteral("timeline.split"), tr("Split at Playhead"), QKeySequence(Qt::Key_S),
         [this] { activeTimeline()->splitAtPlayhead(); });
@@ -330,6 +492,36 @@ void MainWindow::buildMenus()
     add(QStringLiteral("timeline.freeze"), tr("Freeze Frame"), QKeySequence(tr("Shift+F")), [this] { m_tools->freezeFrame(); });
     add(QStringLiteral("timeline.reverse"), tr("Reverse Clip"), QKeySequence(), [this] { m_tools->reverseClip(); });
     add(QStringLiteral("timeline.closegaps"), tr("Close Gaps on Track"), QKeySequence(), [this] { m_tools->closeGaps(); });
+    add(QStringLiteral("timeline.rippletrimhead"), tr("Ripple Trim Start to Playhead"), QKeySequence(Qt::Key_Q),
+        [this] { m_tools->rippleTrimHead(); });
+    add(QStringLiteral("timeline.rippletrimtail"), tr("Ripple Trim End to Playhead"), QKeySequence(Qt::Key_W),
+        [this] { m_tools->rippleTrimTail(); });
+    add(QStringLiteral("timeline.nudgeleft"), tr("Nudge Clips Left One Frame"), QKeySequence(tr("Alt+Left")),
+        [this] { m_tools->nudge(-1); });
+    add(QStringLiteral("timeline.nudgeright"), tr("Nudge Clips Right One Frame"), QKeySequence(tr("Alt+Right")),
+        [this] { m_tools->nudge(1); });
+    add(QStringLiteral("timeline.matchframe"), tr("Match Frame"), QKeySequence(Qt::Key_F), [this, player] {
+        // The source frame under the playhead opens in the Source Monitor.
+        const ProjectData &d = m_project->data();
+        const TimeUs at = player->position();
+        const Clip *c = nullptr;
+        for (const QUuid &id : activeTimeline()->selection()) {
+            const Clip *s = d.clipById(id);
+            if (s && s->contains(at))
+                c = s;
+        }
+        if (!c)
+            c = timeline::topVideoClipAt(d, at);
+        const MediaItem *m = c ? d.mediaById(c->mediaId) : nullptr;
+        if (!m || m->isTitle()) {
+            statusBar()->showMessage(tr("No source clip under the playhead."), 4000);
+            return;
+        }
+        setWorkspace(Video);
+        m_video->sourceMonitor()->loadAt(*m, c->in, c->out, c->sourceAt(at));
+    });
+    add(QStringLiteral("timeline.quickfades"), tr("Quick Fade In/Out"), QKeySequence(tr("Ctrl+Shift+D")),
+        [this] { m_tools->quickFades(); });
     tl->addSeparator();
     add(QStringLiteral("timeline.silences"), tr("Remove Silences (Jump Cuts)..."), QKeySequence(),
         [this] { m_tools->removeSilences(); });
@@ -349,6 +541,10 @@ void MainWindow::buildMenus()
         openAutoClip(media);
     });
     add(QStringLiteral("timeline.beats"), tr("Add Beat Markers..."), QKeySequence(), [this] { m_tools->addBeatMarkers(); });
+    add(QStringLiteral("timeline.tempo"), tr("Detect Tempo (BPM)..."), QKeySequence(), [this] {
+        m_video->programMonitor()->player()->pause();
+        m_tools->detectTempo();
+    });
     add(QStringLiteral("timeline.reframe"), tr("Auto Reframe (Vertical / Square)..."), QKeySequence(),
         [this] { m_tools->autoReframe(); });
     add(QStringLiteral("timeline.voiceover"), tr("Record Audio..."), QKeySequence(tr("Ctrl+R")),
