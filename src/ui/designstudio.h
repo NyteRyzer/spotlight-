@@ -4,6 +4,8 @@
 
 #include <QMainWindow>
 
+#include <optional>
+
 class QListWidget;
 class QComboBox;
 class QStackedWidget;
@@ -40,6 +42,13 @@ public slots:
     void moveSelected(int delta); // +1 = forward, -1 = backward
     void duplicateSelected();
     void exportImage();
+    // Renders the design at several canvas sizes at once (smart resize),
+    // e.g. thumbnail + square post + Shorts cover. Returns the files written.
+    QStringList exportSizes(const QVector<QSize> &sizes, const QString &folder, const QString &baseName);
+    void exportAllSizesDialog();
+    // Photoshop's Copy / Paste Layer Style.
+    void copyLayerStyle();
+    void pasteLayerStyle();
     // Replaces text/shape layers with a ready-made thumbnail layout; image
     // layers (e.g. a captured video frame) are kept underneath.
     void applyTemplate(int index);
@@ -111,6 +120,7 @@ private:
     QCheckBox *m_eraser = nullptr;
     QPushButton *m_brushColorBtn = nullptr;
     bool m_updating = false;
+    std::optional<DesignLayer> m_styleClipboard;
 };
 
 } // namespace spotlight

@@ -23,6 +23,7 @@
 #include <QPainter>
 #include <QAudioInput>
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -1288,6 +1289,78 @@ void EditTools::removeUnusedMedia()
             timeline::removeMedia(d, id);
     });
     emit status(tr("Removed %n unused item(s).", nullptr, int(unused.size())));
+}
+
+// ---------------------------------------------------------------------------
+// v0.4 additions
+
+void EditTools::selectForward()
+{
+    TimelineWidget *tl = timeline();
+    if (!tl)
+        return;
+    const QVector<QUuid> ids = timeline::clipsFrom(m_project->data(), m_player->position());
+    tl->setSelection(ids);
+    emit status(ids.isEmpty() ? tr("No clips after the playhead.")
+                              : tr("Selected %n clip(s) from the playhead on — drag or nudge them together.",
+                                   nullptr, int(ids.size())));
+}
+
+void EditTools::markersAtCuts()
+{
+    int n = 0;
+    m_project->edit(tr("Markers at Cuts"), [&](ProjectData &d) { n = timeline::markersAtCuts(d); });
+    emit status(n ? tr("Added %n marker(s) at the cuts.", nullptr, n) : tr("Every cut already has a marker."));
+}
+
+void EditTools::swapWithNext()
+{
+    const QUuid id = targetClip();
+    if (id.isNull()) {
+        emit status(tr("Select a clip to swap it with the next one."));
+        return;
+    }
+    bool ok = false;
+    m_project->edit(tr("Swap Clips"), [&](ProjectData &d) { ok = timeline::swapWithNext(d, id); });
+    emit status(ok ? tr("Swapped with the next clip.")
+                   : tr("Can't swap: there's no next clip on this track, or linked clips would overlap."));
+}
+
+void EditTools::fitToFill()
+{
+    const QUuid id = targetClip();
+    const Clip *c = m_project->data().clipById(id);
+    if (!c) {
+        emit status(tr("Select a clip to fit it to the gap after it."));
+        return;
+    }
+    // With an Out point after the clip, fill up to it; otherwise up to the
+    // next clip on the track.
+    const ProjectData &pd = m_project->data();
+    const TimeUs until = pd.outPoint > c->start && pd.outPoint != c->end() ? pd.outPoint : -1;
+    bool ok = false;
+    m_project->edit(tr("Fit to Fill"), [&](ProjectData &d) { ok = timeline::fitToFill(d, id, until); });
+    if (!ok) {
+        emit status(tr("Nothing to fill: put a gap after the clip (or an Out point) first."));
+        return;
+    }
+    emit status(tr("Fit to fill: speed set to %1×.").arg(m_project->data().clipById(id)->speed, 0, 'f', 2));
+}
+
+void EditTools::newColorMatte()
+{
+    const QColor color = QColorDialog::getColor(Qt::black, m_window, tr("Color Matte"));
+    if (!color.isValid())
+        return;
+    const SequenceSettings seq = m_project->data().sequence;
+    MediaItem m;
+    QString err;
+    if (!titles::renderColorMatte(color, QSize(seq.width, seq.height), &m, &err)) {
+        QMessageBox::warning(m_window, tr("Color Matte"), err);
+        return;
+    }
+    m_project->edit(tr("New Color Matte"), [&](ProjectData &d) { d.media.append(m); });
+    emit status(tr("Added “%1” to the Media Bin — drag it onto the timeline.").arg(m.name));
 }
 
 } // namespace spotlight

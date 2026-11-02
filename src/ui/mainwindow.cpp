@@ -223,6 +223,10 @@ void MainWindow::buildMenus()
                                       QKeySequence(tr("Ctrl+Shift+E")));
     connect(exportFrameAct, &QAction::triggered, this, &MainWindow::exportFrame);
     file->addAction(exportFrameAct);
+    auto *snapAct = makeAction(this, QStringLiteral("file.snapshot"), F, tr("Snapshot Frame to Media Bin"),
+                               QKeySequence(tr("Ctrl+Alt+S")));
+    connect(snapAct, &QAction::triggered, this, &MainWindow::snapshotToBin);
+    file->addAction(snapAct);
     file->addSeparator();
     auto *relinkAct = makeAction(this, QStringLiteral("file.relink"), F, tr("Re&link Missing Media..."));
     connect(relinkAct, &QAction::triggered, this, &MainWindow::relinkMedia);
@@ -522,6 +526,14 @@ void MainWindow::buildMenus()
         setWorkspace(Video);
         m_video->sourceMonitor()->loadAt(*m, c->in, c->out, c->sourceAt(at));
     });
+    add(QStringLiteral("timeline.selectforward"), tr("Select All Clips After Playhead"), QKeySequence(tr("Shift+A")),
+        [this] { m_tools->selectForward(); });
+    add(QStringLiteral("timeline.swap"), tr("Swap with Next Clip"), QKeySequence(tr("Ctrl+Alt+Right")),
+        [this] { m_tools->swapWithNext(); });
+    add(QStringLiteral("timeline.fitfill"), tr("Fit to Fill (stretch into gap)"), QKeySequence(),
+        [this] { m_tools->fitToFill(); });
+    add(QStringLiteral("timeline.colormatte"), tr("New Color Matte..."), QKeySequence(),
+        [this] { m_tools->newColorMatte(); });
     add(QStringLiteral("timeline.quickfades"), tr("Quick Fade In/Out"), QKeySequence(tr("Ctrl+Shift+D")),
         [this] { m_tools->quickFades(); });
     tl->addSeparator();
@@ -577,6 +589,8 @@ void MainWindow::buildMenus()
     });
     add(QStringLiteral("timeline.nextmarker"), tr("Next Marker"), QKeySequence(tr("Shift+M")), [this] { jumpToMarker(true); });
     add(QStringLiteral("timeline.prevmarker"), tr("Previous Marker"), QKeySequence(tr("Alt+M")), [this] { jumpToMarker(false); });
+    add(QStringLiteral("timeline.cutmarkers"), tr("Add Markers at Every Cut"), QKeySequence(),
+        [this] { m_tools->markersAtCuts(); });
     add(QStringLiteral("timeline.clearmarkers"), tr("Clear All Markers"), QKeySequence(), [this] {
         m_project->edit(tr("Clear Markers"), [](ProjectData &d) { d.markers.clear(); });
     });
@@ -636,6 +650,12 @@ void MainWindow::buildMenus()
     addD(QStringLiteral("design.forward"), tr("Bring Forward"), QKeySequence(tr("Ctrl+]")), [this] { m_design->moveSelected(1); });
     addD(QStringLiteral("design.backward"), tr("Send Backward"), QKeySequence(tr("Ctrl+[")),
          [this] { m_design->moveSelected(-1); });
+    addD(QStringLiteral("design.copystyle"), tr("Copy Layer Style"), QKeySequence(tr("Ctrl+Shift+C")),
+         [this] { m_design->copyLayerStyle(); });
+    addD(QStringLiteral("design.pastestyle"), tr("Paste Layer Style"), QKeySequence(tr("Ctrl+Shift+V")),
+         [this] { m_design->pasteLayerStyle(); });
+    addD(QStringLiteral("design.exportsizes"), tr("Export All Sizes..."), QKeySequence(),
+         [this] { m_design->exportAllSizesDialog(); });
     design->addSeparator();
     auto *capture = makeAction(this, QStringLiteral("design.captureframe"), D, tr("Capture Program Frame to Design"),
                                QKeySequence(tr("Ctrl+Shift+F")));
@@ -927,6 +947,26 @@ void MainWindow::exportFrame()
         statusBar()->showMessage(tr("Saved frame to %1 (%2×%3)").arg(path).arg(frame.width()).arg(frame.height()), 6000);
     else
         QMessageBox::warning(this, tr("Export Frame"), tr("Could not write %1").arg(path));
+}
+
+void MainWindow::snapshotToBin()
+{
+    const QImage frame = m_video->programMonitor()->view()->currentFrame();
+    if (frame.isNull()) {
+        statusBar()->showMessage(tr("Nothing in the Program Monitor to snapshot — move the playhead over a clip."), 6000);
+        return;
+    }
+    const double fps = m_project->data().sequence.frameRate;
+    const QString stamp = formatTimecode(m_video->programMonitor()->player()->position(), fps).replace(':', '-');
+    QString path = QDir(captureDirectory()).filePath(QStringLiteral("Snapshot %1.png").arg(stamp));
+    for (int n = 2; QFileInfo::exists(path); ++n)
+        path = QDir(captureDirectory()).filePath(QStringLiteral("Snapshot %1 (%2).png").arg(stamp).arg(n));
+    if (!frame.save(path)) {
+        QMessageBox::warning(this, tr("Snapshot"), tr("Could not write %1").arg(path));
+        return;
+    }
+    m_video->mediaBin()->importFiles({path});
+    statusBar()->showMessage(tr("Snapshot added to the Media Bin."), 5000);
 }
 
 void MainWindow::relinkMedia()

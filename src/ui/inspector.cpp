@@ -316,7 +316,8 @@ QWidget *ClipInspector::buildVideoTab()
     auto *motion = new QComboBox;
     motion->addItems(motionNames());
     motion->setToolTip(tr("Ken Burns: a slow zoom or pan across the clip.\n"
-                          "Slide / Pop: an animated entrance over the first %1 s.")
+                          "Slide / Drop / Pop: an animated entrance over the first %1 s.\n"
+                          "Camera Shake: handheld wobble for impact moments.")
                            .arg(kEntranceSeconds));
     mo->addRow(tr("Animation"), motion);
     connect(motion, &QComboBox::activated, this,
@@ -449,6 +450,10 @@ QWidget *ClipInspector::buildEffectsTab()
               [](Clip &c, double v) { c.fx.grain = v; });
     addSlider(style, tr("Pixelate"), 0, 100, 0.01, [](const Clip &c) { return c.fx.pixelate; },
               [](Clip &c, double v) { c.fx.pixelate = v; });
+    addSlider(style, tr("Glitch (RGB split)"), 0, 100, 0.01, [](const Clip &c) { return c.fx.rgbSplit; },
+              [](Clip &c, double v) { c.fx.rgbSplit = v; });
+    addSlider(style, tr("Posterize"), 0, 100, 0.01, [](const Clip &c) { return c.fx.posterize; },
+              [](Clip &c, double v) { c.fx.posterize = v; });
     addCheck(style, tr("Invert colors"), [](const Clip &c) { return c.fx.invert; },
              [](Clip &c, bool on) { c.fx.invert = on; });
     addCheck(style, tr("Cinema bars (2.39:1)"), [](const Clip &c) { return c.fx.cinemaBars; },

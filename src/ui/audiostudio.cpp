@@ -226,6 +226,12 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
              t.fx.reverbEnabled = true;
              t.fx.reverbMix = 0.3;
          }},
+        {tr("Robot"), tr("Metallic robot voice"), [](Track &t) { t.fx.robot = true; }},
+        {tr("Bass Boost"), tr("+6 dB of low end, slightly wider stereo"),
+         [](Track &t) {
+             t.fx.bassDb = 6;
+             t.fx.stereoWidth = 1.3;
+         }},
         {tr("Clear All"), tr("Remove every effect from this track"), [](Track &t) {
              t.fx = AudioFx();
              t.voice = false;
@@ -274,8 +280,19 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
            [](Track &t, double v) { t.fx.pitchSemitones = v; });
     check(voice, tr("Telephone / radio"), [](const Track &t) { return t.fx.telephone; },
           [](Track &t, bool on) { t.fx.telephone = on; });
+    check(voice, tr("Robot voice"), [](const Track &t) { return t.fx.robot; },
+          [](Track &t, bool on) { t.fx.robot = on; });
     check(voice, tr("Chorus (thicker, doubled)"), [](const Track &t) { return t.fx.chorus; },
           [](Track &t, bool on) { t.fx.chorus = on; });
+
+    auto *tone = section(tr("Tone"));
+    slider(tone, tr("Bass"), -12, 12, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.bassDb; },
+           [](Track &t, double v) { t.fx.bassDb = v; });
+    slider(tone, tr("Treble"), -12, 12, 1, QStringLiteral(" dB"), [](const Track &t) { return t.fx.trebleDb; },
+           [](Track &t, double v) { t.fx.trebleDb = v; });
+    slider(tone, tr("Stereo width"), 0, 25, 0.1, QStringLiteral("×"), [](const Track &t) { return t.fx.stereoWidth; },
+           [](Track &t, double v) { t.fx.stereoWidth = v; })
+        ->setToolTip(tr("1× = as recorded, 0× = mono, above 1× = wider"));
 
     auto *filters = section(tr("Filters"));
     slider(filters, tr("High-pass (cut lows)"), 0, 100, 10, QStringLiteral(" Hz"),

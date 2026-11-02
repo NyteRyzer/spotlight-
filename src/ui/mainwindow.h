@@ -55,6 +55,8 @@ private:
     void captureFrame(const QImage &frame);
     QString captureDirectory() const;
     void exportFrame();
+    // Saves the Program Monitor frame as a PNG and imports it into the bin.
+    void snapshotToBin();
     void relinkMedia();
     void openAutoClip(const QUuid &mediaId);
     void placeDesignOnTimeline();

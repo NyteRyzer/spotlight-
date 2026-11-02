@@ -2,6 +2,8 @@
 #include "core/exporter.h"
 #include "core/project.h"
 #include "core/timelineops.h"
+#include "core/titles.h"
+#include "ui/designcanvas.h"
 #include "ui/designstudio.h"
 #include "ui/commandpalette.h"
 #include "ui/mainwindow.h"
@@ -34,6 +36,7 @@
 #include <QSettings>
 #include <QTimer>
 #include <QDir>
+#include <QTemporaryDir>
 #include <QtTest>
 
 using namespace spotlight;
@@ -160,6 +163,27 @@ private slots:
         sl.layer.elapsed = 2.0;
         view.setTracks({sl});
         QCOMPARE(QColor(view.currentFrame().pixel(160, 90)), QColor(Qt::blue));
+
+        // Posterize to 2 levels: a 96-grey goes black (same as the export).
+        QImage grey(320, 180, QImage::Format_RGB32);
+        grey.fill(QColor(96, 96, 96));
+        ViewTrack po;
+        po.layer.still = grey;
+        po.layer.clip.fx.posterize = 1.0;
+        view.setTracks({po});
+        QCOMPARE(QColor(view.currentFrame().pixel(160, 90)), QColor(Qt::black));
+        // Glitch: at a red|blue boundary, red is pulled left and blue right.
+        QImage rb(320, 180, QImage::Format_RGB32);
+        rb.fill(Qt::blue);
+        for (int y = 0; y < 180; ++y)
+            for (int x = 160; x < 320; ++x)
+                rb.setPixel(x, y, qRgb(255, 0, 0));
+        ViewTrack gl;
+        gl.layer.still = rb;
+        gl.layer.clip.fx.rgbSplit = 1.0; // 180/40 = ~4-5 px
+        view.setTracks({gl});
+        const QColor mixL = view.currentFrame().pixel(158, 90);
+        QVERIFY2(mixL.red() > 200 && mixL.blue() > 200, qPrintable(mixL.name())); // red bled left onto blue
     }
 
     void designEffectsRender()
@@ -274,6 +298,33 @@ private slots:
             if (!dump.isEmpty())
                 img.save(QStringLiteral("%1/template-%2.png").arg(dump).arg(i));
         }
+
+        // Export All Sizes writes one refit image per size.
+        QTemporaryDir out;
+        const QStringList files = studio.exportSizes({QSize(1280, 720), QSize(1080, 1920)}, out.path(), "Thumb");
+        QCOMPARE(files.size(), 2);
+        QCOMPARE(QImage(out.path() + "/Thumb 1080x1920.png").size(), QSize(1080, 1920));
+        QCOMPARE(project.data().design.canvasSize, QSize(1280, 720)); // the design itself is unchanged
+
+        // Copy / paste layer style between two text layers.
+        DesignLayer a, b;
+        a.id = QUuid::createUuid();
+        b.id = QUuid::createUuid();
+        a.type = b.type = LayerType::Text;
+        a.text = "A";
+        b.text = "B";
+        a.glow = true;
+        a.textColor = Qt::green;
+        project.edit("Layers", [&](ProjectData &d) { d.design.layers = {a, b}; });
+        auto *canvas = studio.findChild<DesignCanvas *>();
+        canvas->setSelectedLayer(a.id);
+        studio.copyLayerStyle();
+        canvas->setSelectedLayer(b.id);
+        studio.pasteLayerStyle();
+        const DesignLayer *pb = project.data().design.layer(b.id);
+        QVERIFY(pb->glow);
+        QCOMPARE(pb->textColor, QColor(Qt::green));
+        QCOMPARE(pb->text, QStringLiteral("B"));
     }
 
     void recordsAudioTakes()
@@ -504,6 +555,33 @@ private slots:
             project->undoStack()->undo(); // reverse
             project->undoStack()->undo(); // freeze
             QCOMPARE(project->data().duration(), before);
+
+            // Select forward, swap and fit to fill through the tools.
+            video->programMonitor()->player()->seek(0);
+            tools->selectForward();
+            QCOMPARE(video->timeline()->selection().size(), 2); // clip + its audio
+            // Snapshot: a color matte on V2 shows immediately in the monitor.
+            MediaItem matte;
+            QVERIFY(titles::renderColorMatte(QColor(200, 30, 30), QSize(1920, 1080), &matte));
+            project->edit("Matte", [&](ProjectData &d) {
+                d.media.append(matte);
+                timeline::placeMedia(d, matte.id, 1, 0, 0, kUsPerSecond);
+            });
+            video->programMonitor()->player()->seek(kUsPerSecond / 2);
+            const int before2 = project->data().media.size();
+            QAction *snap = nullptr;
+            for (QAction *a : w.findChildren<QAction *>()) {
+                if (a->text() == "Snapshot Frame to Media Bin")
+                    snap = a;
+            }
+            QVERIFY(snap);
+            snap->trigger();
+            QTRY_COMPARE_WITH_TIMEOUT(project->data().media.size(), before2 + 1, 15000);
+            QImage shot(project->data().media.last().path);
+            QCOMPARE(shot.size(), QSize(1920, 1080));
+            QCOMPARE(QColor(shot.pixel(960, 540)), QColor(200, 30, 30));
+            project->undoStack()->undo(); // import
+            project->undoStack()->undo(); // matte
         }
 
         // Design studio: text layer + undo.

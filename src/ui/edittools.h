@@ -66,6 +66,13 @@ public slots:
     void collectFiles();    // copy project + media into one folder
     void removeUnusedMedia();
 
+    // v0.4 additions.
+    void selectForward();   // every clip from the playhead on
+    void markersAtCuts();
+    void swapWithNext();
+    void fitToFill();
+    void newColorMatte();
+
 signals:
     void status(const QString &message);
 

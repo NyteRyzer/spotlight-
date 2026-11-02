@@ -7,6 +7,9 @@
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -16,6 +19,7 @@
 #include <QHBoxLayout>
 #include <QImageReader>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QPlainTextEdit>
@@ -838,6 +842,90 @@ void DesignStudio::exportImage()
         emit status(tr("Exported %1 (%2×%3)").arg(QFileInfo(path).fileName()).arg(img.width()).arg(img.height()));
     else
         emit status(tr("Could not write %1").arg(path));
+}
+
+QStringList DesignStudio::exportSizes(const QVector<QSize> &sizes, const QString &folder, const QString &baseName)
+{
+    QStringList written;
+    for (const QSize &size : sizes) {
+        DesignDocument doc = m_project->data().design;
+        DesignRenderer r;
+        r.resizeDocument(doc, size);
+        const QImage img = r.renderToImage(doc);
+        const QString path =
+            QDir(folder).filePath(QStringLiteral("%1 %2x%3.png").arg(baseName).arg(size.width()).arg(size.height()));
+        if (img.save(path))
+            written << path;
+    }
+    return written;
+}
+
+void DesignStudio::exportAllSizesDialog()
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Export All Sizes"));
+    auto *form = new QFormLayout(&dlg);
+    auto *info = new QLabel(tr("Renders this design at every size you tick. Layers are refit to each canvas "
+                               "(smart resize), so one design gives you a thumbnail, a square post and a story."),
+                            &dlg);
+    info->setWordWrap(true);
+    form->addRow(info);
+    QVector<QPair<QCheckBox *, QSize>> boxes;
+    const QSize current = m_project->data().design.canvasSize;
+    for (const auto &p : canvasPresets()) {
+        auto *cb = new QCheckBox(p.name, &dlg);
+        cb->setChecked(p.size == current || p.size == QSize(1080, 1080) || p.size == QSize(1080, 1920)
+                       || p.size == QSize(1280, 720));
+        form->addRow(cb);
+        boxes.append({cb, p.size});
+    }
+    auto *name = new QLineEdit(m_project->displayName(), &dlg);
+    form->addRow(tr("File name"), name);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Choose Folder && Export"));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    QVector<QSize> sizes;
+    for (const auto &[cb, size] : boxes) {
+        if (cb->isChecked())
+            sizes << size;
+    }
+    if (sizes.isEmpty())
+        return;
+    QSettings s;
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr("Export To"),
+        s.value(QStringLiteral("paths/designExport"), QStandardPaths::writableLocation(QStandardPaths::PicturesLocation))
+            .toString());
+    if (dir.isEmpty())
+        return;
+    s.setValue(QStringLiteral("paths/designExport"), dir);
+    const QStringList files = exportSizes(sizes, dir, name->text().trimmed().isEmpty() ? tr("Design") : name->text().trimmed());
+    emit status(tr("Exported %n image(s) to %1", nullptr, int(files.size())).arg(QDir::toNativeSeparators(dir)));
+}
+
+void DesignStudio::copyLayerStyle()
+{
+    const DesignLayer *l = m_project->data().design.layer(m_canvas->selectedLayer());
+    if (!l) {
+        emit status(tr("Select a layer to copy its style."));
+        return;
+    }
+    m_styleClipboard = *l;
+    emit status(tr("Copied the style of “%1”.").arg(l->name));
+}
+
+void DesignStudio::pasteLayerStyle()
+{
+    if (!m_styleClipboard) {
+        emit status(tr("Copy a layer's style first."));
+        return;
+    }
+    const DesignLayer src = *m_styleClipboard;
+    editLayer(QString(), [&src](DesignLayer &l) { spotlight::pasteLayerStyle(src, l); });
 }
 
 QStringList DesignStudio::templateNames()

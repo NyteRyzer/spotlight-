@@ -27,6 +27,10 @@ mix its audio, then design its thumbnail, all in **one project**.
   **loop playback** and **go to timecode** (`Ctrl+G`).
 - **Organize clips:** color labels, clip names, enable/disable (`Shift+E`), **replace clip** with bin media and
   **paste attributes** (look, transform, effects, audio) onto many clips at once.
+- **Select every clip after the playhead** (`Shift+A`), **swap a clip with the next one** (`Ctrl+Alt+→`),
+  **Fit to Fill** (speed a clip up or down to fill a gap exactly), **markers at every cut**, and **color mattes**
+  (solid-color clips for slugs and backgrounds).
+- **Snapshot** any frame straight into the Media Bin (`Ctrl+Alt+S`).
 - **Markers panel:** rename, jump and delete markers, and turn them into **YouTube chapters** for your description.
 - **Layered compositing.** Upper tracks sit on top of lower ones, so you can do **picture-in-picture**,
   **split screen**, overlays and logos.
@@ -39,9 +43,10 @@ mix its audio, then design its thumbnail, all in **one project**.
 - **Looks / filters:** Warm, Cool, Vivid, Cinematic, Vintage, Faded, Moody, Dreamy, B&W, Noir and Sepia. You can
   also fine-tune brightness, contrast, saturation, temperature, tint, vignette and blur.
 - **Chroma key** (green and blue screen), **Ken Burns** zoom and pan, and **stabilization**.
-- **Effects:** sharpen, film grain, pixelate (censor), invert, **cinema bars**, hue and gamma, plus **blur fill**
+- **Effects:** sharpen, film grain, pixelate (censor), invert, **glitch (RGB split)**, **posterize**,
+  **cinema bars**, hue and gamma, plus **blur fill**
   (the blurred background behind vertical clips) and a **border** for picture-in-picture.
-- **Entrance animations:** slide in from the left, right or bottom, and pop in.
+- **Animations:** slide in from the left, right or bottom, drop in from the top, pop in, and **camera shake**.
 - **Auto-Clip for videos and stream VODs:** import a long video and SPOTLIGHT! finds the moments worth clipping
   (big reactions, hype, laughter, fast action) on its own. Review the clips with thumbnails and a preview, then
   add them to the timeline as a highlight reel or export each one, ready for Shorts, TikTok and Reels as vertical
@@ -57,7 +62,8 @@ mix its audio, then design its thumbnail, all in **one project**.
 ### 🎚 Audio Studio (Logic Pro)
 - Waveform timeline with a **mixer**: volume, pan, mute and solo.
 - Per-track effects: **dialogue cleanup** (denoise), **noise gate**, **de-esser**, **3-band EQ**, **compressor**,
-  **voice changer** (pitch shift), **telephone/radio**, **chorus**, **high-pass and low-pass filters**, **reverb**,
+  **voice changer** (pitch shift), **robot voice**, **bass and treble**, **stereo widener**, **telephone/radio**,
+  **chorus**, **high-pass and low-pass filters**, **reverb**,
   **echo/delay**, **mono** and **limiter**.
 - **Detect tempo (BPM)** from a music clip and drop bar markers on the beat.
 - **Loudness meter:** measures the whole mix (integrated LUFS, range, true peak) against YouTube, podcast and
@@ -66,7 +72,8 @@ mix its audio, then design its thumbnail, all in **one project**.
 - **Auto-ducking:** music dips automatically under voice tracks, and you can see and hear it while editing.
 - **Record audio** from any mic or interface (**● Record** in the Audio Studio, or `Ctrl+R`). It has a live
   level meter, a count-in, play-along, and unlimited takes on the track you choose. Takes are saved as lossless WAV.
-- One-click presets: Podcast Voice, Music Bed, Deep Voice, Chipmunk, Big Hall, Phone Call and Underwater. Plus clip
+- One-click presets: Podcast Voice, Music Bed, Deep Voice, Chipmunk, Big Hall, Phone Call, Underwater, Robot and
+  Bass Boost. Plus clip
   gain, fades and **Normalize**.
 
 ### 🎨 Design Studio (Photoshop)
@@ -83,7 +90,10 @@ mix its audio, then design its thumbnail, all in **one project**.
   boxes. Shapes can use gradient fills, and photos can get a one-color **tint** (duotone).
 - **Eight thumbnail templates** (Reaction, Tutorial, Podcast, Versus, Gaming, Vlog, Before/After, Top 10),
   safe-zone guides (including the YouTube timestamp corner), and canvas presets for thumbnails, channel art,
-  posters and stories. **Smart resize** refits your layout when you switch, say, from a thumbnail to a Shorts cover.
+  posters and stories. **Smart resize** refits your layout when you switch, say, from a thumbnail to a Shorts cover,
+  and **Export All Sizes** renders a thumbnail, square post and story from one design in one click.
+- **Copy / paste layer style** (`Ctrl+Shift+C` / `Ctrl+Shift+V`) moves shadows, glow, stroke and text styling
+  between layers.
 - **Grab any video frame** as a layer, and send any design **to the timeline** as an intro or end card.
 
 ### 🔗 One connected project
@@ -129,6 +139,8 @@ Get the latest build from the **[Releases page](https://github.com/NyteRyzer/spo
 | Nudge clips one frame | `Alt+←` / `Alt+→` | Match frame | `F` |
 | Enable / disable clip | `Shift+E` | Quick fade in/out | `Ctrl+Shift+D` |
 | Copy / paste attributes | `Ctrl+Alt+C` / `Ctrl+Alt+V` | Clear In/Out | `Ctrl+Shift+X` |
+| Select clips after playhead | `Shift+A` | Swap with next clip | `Ctrl+Alt+→` |
+| Snapshot frame to Media Bin | `Ctrl+Alt+S` | Copy / paste layer style | `Ctrl+Shift+C` / `V` |
 
 (`Ctrl` is `⌘` on macOS. Every shortcut can be changed in **Edit → Keyboard Shortcuts**.)
 
