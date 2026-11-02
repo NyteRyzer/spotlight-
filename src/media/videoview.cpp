@@ -123,14 +123,16 @@ QImage VideoView::processed(const ViewLayer &l, const QSize &target, bool cache)
                            .arg(c.key.color.rgb())
                            .arg(c.key.similarity)
                            .arg(c.key.blend)
-                           .arg(QStringLiteral("%1,%2,%3,%4,%5,%6,%7")
+                           .arg(QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9")
                                     .arg(c.color.hue)
                                     .arg(c.color.gamma)
                                     .arg(c.fx.sharpen)
                                     .arg(c.fx.grain)
                                     .arg(int(c.fx.invert) | int(c.fx.cinemaBars) << 1)
                                     .arg(c.fx.pixelate)
-                                    .arg(target.height())));
+                                    .arg(target.height())
+                                    .arg(c.fx.posterize)
+                                    .arg(c.fx.rgbSplit)));
         auto it = m_cache.constFind(id);
         if (it != m_cache.constEnd() && it->key == key)
             return it->image;
@@ -156,6 +158,10 @@ QImage VideoView::processed(const ViewLayer &l, const QSize &target, bool cache)
         img = sharpenImage(img, sharpenAmount(fx.sharpen));
     if (fx.pixelate > 0)
         img = pixelateImage(img, pixelBlock(fx.pixelate, img.height()));
+    if (fx.posterize > 0)
+        img = posterizeImage(img, posterizeLevels(fx.posterize));
+    if (fx.rgbSplit > 0)
+        img = rgbSplitImage(img, rgbSplitPixels(fx.rgbSplit, img.height()));
     if (fx.grain > 0)
         img = addGrain(img, grainStrength(fx.grain), quint32(l.still.isNull() ? m_serial.value(l.slot) : 1) * 2654435761u);
     if (fx.cinemaBars) {

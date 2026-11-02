@@ -243,6 +243,41 @@ QImage pixelateImage(const QImage &src, int block)
     return small.scaled(src.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation);
 }
 
+QImage posterizeImage(const QImage &src, int levels)
+{
+    if (src.isNull() || levels < 2 || levels > 255)
+        return src;
+    QImage img = argb(src);
+    std::array<int, 256> lut{};
+    for (int i = 0; i < 256; ++i)
+        lut[i] = std::clamp(i * levels / 256 * 255 / (levels - 1), 0, 255);
+    for (int y = 0; y < img.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x)
+            line[x] = qRgba(lut[qRed(line[x])], lut[qGreen(line[x])], lut[qBlue(line[x])], qAlpha(line[x]));
+    }
+    return img;
+}
+
+QImage rgbSplitImage(const QImage &src, int shift)
+{
+    if (src.isNull() || shift <= 0)
+        return src;
+    const QImage in = argb(src);
+    QImage img = in.copy();
+    const int w = img.width();
+    for (int y = 0; y < img.height(); ++y) {
+        const auto *s = reinterpret_cast<const QRgb *>(in.constScanLine(y));
+        auto *d = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const int r = qRed(s[std::min(w - 1, x + shift)]); // red shifted left
+            const int b = qBlue(s[std::max(0, x - shift)]);    // blue shifted right
+            d[x] = qRgba(r, qGreen(s[x]), b, qAlpha(s[x]));
+        }
+    }
+    return img;
+}
+
 QImage addGrain(const QImage &src, double strength, quint32 seed)
 {
     if (src.isNull() || strength <= 0)

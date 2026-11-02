@@ -53,6 +53,65 @@ QStringList blendModeNames()
             QStringLiteral("Soft Light"),  QStringLiteral("Difference"),  QStringLiteral("Exclusion")};
 }
 
+void pasteLayerStyle(const DesignLayer &src, DesignLayer &dst)
+{
+    dst.opacity = src.opacity;
+    dst.blend = src.blend;
+    dst.dropShadow = src.dropShadow;
+    dst.shadowColor = src.shadowColor;
+    dst.shadowBlur = src.shadowBlur;
+    dst.shadowDistance = src.shadowDistance;
+    dst.shadowAngle = src.shadowAngle;
+    dst.glow = src.glow;
+    dst.glowColor = src.glowColor;
+    dst.glowSize = src.glowSize;
+    dst.strokeWidth = src.strokeWidth;
+    dst.strokeColor = src.strokeColor;
+    if (src.type != dst.type)
+        return;
+    switch (src.type) {
+    case LayerType::Text:
+        dst.fontFamily = src.fontFamily;
+        dst.fontSize = src.fontSize;
+        dst.bold = src.bold;
+        dst.italic = src.italic;
+        dst.textColor = src.textColor;
+        dst.outlineColor = src.outlineColor;
+        dst.outlineWidth = src.outlineWidth;
+        dst.shadow = src.shadow;
+        dst.letterSpacing = src.letterSpacing;
+        dst.lineHeight = src.lineHeight;
+        dst.textGradient = src.textGradient;
+        dst.textColor2 = src.textColor2;
+        dst.textGradientAngle = src.textGradientAngle;
+        dst.textBox = src.textBox;
+        dst.textBoxColor = src.textBoxColor;
+        dst.textBoxPadding = src.textBoxPadding;
+        break;
+    case LayerType::Shape:
+        dst.fillColor = src.fillColor;
+        dst.fillColor2 = src.fillColor2;
+        dst.gradient = src.gradient;
+        dst.gradientAngle = src.gradientAngle;
+        dst.cornerRadius = src.cornerRadius;
+        break;
+    case LayerType::Image:
+        dst.brightness = src.brightness;
+        dst.contrast = src.contrast;
+        dst.saturation = src.saturation;
+        dst.hue = src.hue;
+        dst.blur = src.blur;
+        dst.grayscale = src.grayscale;
+        dst.invert = src.invert;
+        dst.tint = src.tint;
+        dst.tintColor = src.tintColor;
+        dst.tintAmount = src.tintAmount;
+        break;
+    default:
+        break;
+    }
+}
+
 QStringList shapeKindNames()
 {
     return {QStringLiteral("Rectangle"), QStringLiteral("Ellipse"), QStringLiteral("Triangle"),

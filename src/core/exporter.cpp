@@ -93,6 +93,14 @@ QStringList audioFxChain(const AudioFx &fx, int sr)
     if (fx.telephone)
         chain << QStringLiteral("highpass=f=300") << QStringLiteral("lowpass=f=3400")
               << QStringLiteral("acompressor=threshold=0.1:ratio=6:makeup=2");
+    if (!qFuzzyIsNull(fx.bassDb))
+        chain << QStringLiteral("bass=g=%1:f=110").arg(num(std::clamp(fx.bassDb, -12.0, 12.0)));
+    if (!qFuzzyIsNull(fx.trebleDb))
+        chain << QStringLiteral("treble=g=%1:f=6000").arg(num(std::clamp(fx.trebleDb, -12.0, 12.0)));
+    if (fx.robot) {
+        // Zeroing the phase of every FFT bin gives the classic robot voice.
+        chain << QStringLiteral("afftfilt=real='hypot(re\\,im)':imag='0':win_size=512:overlap=0.75");
+    }
     if (fx.eqEnabled) {
         chain << QStringLiteral("bass=g=%1:f=100").arg(num(fx.lowGainDb))
               << QStringLiteral("equalizer=f=1000:t=q:w=1:g=%1").arg(num(fx.midGainDb))
@@ -110,6 +118,8 @@ QStringList audioFxChain(const AudioFx &fx, int sr)
         chain << QStringLiteral("asetrate=%1").arg(qRound(sr * f)) << QStringLiteral("aresample=%1").arg(sr)
               << atempoChain(1.0 / f);
     }
+    if (!qFuzzyCompare(fx.stereoWidth, 1.0))
+        chain << QStringLiteral("extrastereo=m=%1").arg(num(std::clamp(fx.stereoWidth, 0.0, 2.5)));
     if (fx.chorus)
         chain << QStringLiteral("chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3");
     if (fx.echoEnabled) {
@@ -216,6 +226,19 @@ MotionExpr motionExpr(Motion m, TimeUs duration)
             e.zoom = QStringLiteral("if(lt(%1\\,0.7)\\,0.6+0.5*%1/0.7\\,1.1-0.1*(%1-0.7)/0.3)").arg(e0);
         break;
     }
+    case Motion::SlideInDown: {
+        const QString e0 = QStringLiteral("min(max(t/%1\\,0)\\,1)").arg(num(kEntranceSeconds));
+        e.fy = QStringLiteral("(-pow(1-%1\\,3))").arg(e0);
+        break;
+    }
+    case Motion::Shake: {
+        // Mirrors motionAt().
+        const QString k = num(kShakeAmount);
+        e.zoom = num(1.0 + 4 * kShakeAmount);
+        e.dx = QStringLiteral("(%1*(sin(2*PI*3.1*t)+0.6*sin(2*PI*7.3*t)))").arg(k);
+        e.dy = QStringLiteral("(%1*(sin(2*PI*2.3*t+1)+0.6*sin(2*PI*6.1*t)))").arg(k);
+        break;
+    }
     }
     return e;
 }
@@ -310,6 +333,15 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
                   .arg(std::max(1, fit.width() / b))
                   .arg(std::max(1, fit.height() / b))
            << QStringLiteral("scale=%1:%2:flags=neighbor").arg(fit.width()).arg(fit.height());
+    }
+    if (fx.posterize > 0) {
+        const QString L = QString::number(posterizeLevels(fx.posterize));
+        const QString q = QStringLiteral("'floor(val*%1/256)*255/(%1-1)'").arg(L);
+        ch << QStringLiteral("format=rgb24") << QStringLiteral("lutrgb=r=%1:g=%1:b=%1").arg(q);
+    }
+    if (fx.rgbSplit > 0) {
+        const int sh = rgbSplitPixels(fx.rgbSplit, fit.height());
+        ch << QStringLiteral("rgbashift=rh=-%1:bh=%1:edge=smear").arg(sh);
     }
     if (fx.grain > 0)
         ch << QStringLiteral("noise=alls=%1:allf=t").arg(int(std::lround(grainStrength(fx.grain))));

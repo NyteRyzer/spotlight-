@@ -98,6 +98,16 @@ int cinemaBarHeight(const QSize &picture)
     return std::max(0, int((picture.height() - visible) / 2.0));
 }
 
+int rgbSplitPixels(double amount, int height)
+{
+    return std::max(1, int(std::lround(std::clamp(amount, 0.0, 1.0) * height / 40.0)));
+}
+
+int posterizeLevels(double amount)
+{
+    return std::clamp(int(std::lround(16 - std::clamp(amount, 0.0, 1.0) * 14)), 2, 16);
+}
+
 int borderPixels(double amount, int frameHeight)
 {
     return std::max(2, int(std::lround(std::clamp(amount, 0.0, 0.2) * frameHeight / 2.0)) * 2);
@@ -156,12 +166,14 @@ QStringList motionNames()
     auto tr = [](const char *s) { return QCoreApplication::translate("Motion", s); };
     return {tr("None"),          tr("Zoom In"),        tr("Zoom Out"),     tr("Pan Left"),
             tr("Pan Right"),     tr("Pan Up"),         tr("Pan Down"),     tr("Slide In from Left"),
-            tr("Slide In from Right"), tr("Slide In from Bottom"), tr("Pop In")};
+            tr("Slide In from Right"), tr("Slide In from Bottom"), tr("Pop In"), tr("Drop In from Top"),
+            tr("Camera Shake")};
 }
 
 bool isEntrance(Motion m)
 {
-    return m == Motion::SlideInLeft || m == Motion::SlideInRight || m == Motion::SlideInUp || m == Motion::PopIn;
+    return m == Motion::SlideInLeft || m == Motion::SlideInRight || m == Motion::SlideInUp || m == Motion::PopIn
+        || m == Motion::SlideInDown;
 }
 
 MotionState motionAt(Motion m, double p, double elapsed)
@@ -212,6 +224,18 @@ MotionState motionAt(Motion m, double p, double elapsed)
         // Grow from 60 % with a small overshoot, then settle.
         s.zoom = e0 < 0.7 ? 0.6 + 0.5 * (e0 / 0.7) : 1.1 - 0.1 * ((e0 - 0.7) / 0.3);
         break;
+    case Motion::SlideInDown:
+        s.fy = -(1.0 - e);
+        break;
+    case Motion::Shake: {
+        // Two detuned sines per axis read as handheld wobble; a small zoom
+        // keeps the frame edges hidden. Mirrored by the exporter.
+        const double t = elapsed > 1e8 ? 0.0 : elapsed;
+        s.zoom = 1.0 + 4 * kShakeAmount;
+        s.dx = kShakeAmount * (std::sin(2 * M_PI * 3.1 * t) + 0.6 * std::sin(2 * M_PI * 7.3 * t));
+        s.dy = kShakeAmount * (std::sin(2 * M_PI * 2.3 * t + 1.0) + 0.6 * std::sin(2 * M_PI * 6.1 * t));
+        break;
+    }
     }
     return s;
 }

@@ -36,6 +36,10 @@ QString generatedDir();
 // Renders the document to a new PNG and describes it as a media item.
 bool renderTitleMedia(const DesignDocument &doc, const QString &name, MediaItem *out, QString *error);
 
+// Color Matte (Premiere): a full-frame solid colour still, e.g. a black slug
+// or a background for titles. Kept as a title so it survives a missing file.
+bool renderColorMatte(const QColor &color, const QSize &frame, MediaItem *out, QString *error = nullptr);
+
 // Re-renders title PNGs that are missing on disk (e.g. a project opened on
 // another computer). Returns the number re-rendered.
 int restoreMissingTitles(QVector<MediaItem> &media);

@@ -95,10 +95,15 @@ private slots:
         c->color.gamma = 1.3;
         c->enabled = false;
         c->colorLabel = 4;
+        c->fx.rgbSplit = 0.3;
+        c->fx.posterize = 0.6;
         c->name = "Hook";
         d.tracks[3].fx.telephone = true;
         d.tracks[3].fx.lowpassHz = 2500;
         d.tracks[3].fx.mono = true;
+        d.tracks[3].fx.bassDb = 5;
+        d.tracks[3].fx.stereoWidth = 1.8;
+        d.tracks[3].fx.robot = true;
         d.inPoint = S;
         d.outPoint = 3 * S;
         d.design.layers[0].textGradient = true;
@@ -140,6 +145,9 @@ private slots:
         QCOMPARE(back.clipById(id)->name, QStringLiteral("Hook"));
         QVERIFY(back.tracks[3].fx.telephone && back.tracks[3].fx.mono);
         QCOMPARE(back.tracks[3].fx.lowpassHz, 2500.0);
+        QCOMPARE(back.tracks[3].fx.bassDb, 5.0);
+        QCOMPARE(back.tracks[3].fx.stereoWidth, 1.8);
+        QVERIFY(back.tracks[3].fx.robot);
         QCOMPARE(back.inPoint, S);
         QCOMPARE(back.outPoint, 3 * S);
         QVERIFY(back.design.layers[0].textGradient);

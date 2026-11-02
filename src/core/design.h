@@ -111,6 +111,12 @@ struct DesignLayer {
     static DesignLayer fromJson(const QJsonObject &o);
 };
 
+// Paste Layer Style (Photoshop): copies the look of `src` onto `dst`:
+// opacity, blend mode and effects always; text styling between text layers,
+// fill between shapes and image adjustments between images. Content,
+// position and size are kept.
+void pasteLayerStyle(const DesignLayer &src, DesignLayer &dst);
+
 // Canvas size presets for common creator graphics.
 struct CanvasPreset {
     QString name;

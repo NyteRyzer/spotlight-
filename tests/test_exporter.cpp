@@ -224,6 +224,38 @@ private slots:
         QVERIFY2(start.red() < 40 && start.green() < 40 && start.blue() < 40, qPrintable(start.name()));
     }
 
+    void glitchPosterizeShakeAndVoiceFx()
+    {
+        const QString ffmpeg = Exporter::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg not installed", "");
+        QTemporaryDir tmp;
+        QString log;
+        // A flat grey of 96: with 2 posterize levels it must go to black.
+        const QString grey = tmp.path() + "/grey.mp4";
+        QVERIFY(makeMedia(ffmpeg, grey, "color=c=0x606060:s=320x180:r=25", 2));
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addFile(d, grey, 2 * S, {320, 180});
+        const QUuid c = timeline::placeMedia(d, m, 0, 0, 0, 2 * S);
+        d.clipById(c)->fx.posterize = 1.0;
+        d.clipById(c)->fx.rgbSplit = 0.5;
+        d.clipById(c)->motion = Motion::Shake;
+        AudioFx &fx = d.tracks[d.audioTrackIndices()[0]].fx;
+        fx.bassDb = 6;
+        fx.trebleDb = -4;
+        fx.stereoWidth = 2.0;
+        fx.robot = true;
+        QVERIFY2(render(d, smallPreset(), tmp.path() + "/fx.mp4", &log), qPrintable(log));
+        QVERIFY(std::abs(durationOf(tmp.path() + "/fx.mp4") - 2.0) < 0.15);
+        const QColor px = pixelAt(ffmpeg, tmp.path() + "/fx.mp4", 1, 160, 90, 320, 180);
+        QVERIFY2(px.red() < 30 && px.green() < 30 && px.blue() < 30, qPrintable(px.name()));
+        // Without posterize the grey stays grey (and shake keeps the frame filled).
+        d.clipById(c)->fx.posterize = 0;
+        QVERIFY2(render(d, smallPreset(), tmp.path() + "/fx2.mp4", &log), qPrintable(log));
+        const QColor g = pixelAt(ffmpeg, tmp.path() + "/fx2.mp4", 1, 4, 4, 320, 180);
+        QVERIFY2(g.red() > 70 && g.red() < 120, qPrintable(g.name()));
+    }
+
     void gifRangeAndLoudness()
     {
         const QString ffmpeg = Exporter::findFfmpeg();

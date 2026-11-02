@@ -290,6 +290,14 @@ bool renderTitleMedia(const DesignDocument &doc, const QString &name, MediaItem 
     return true;
 }
 
+bool renderColorMatte(const QColor &color, const QSize &frame, MediaItem *out, QString *error)
+{
+    DesignDocument doc;
+    doc.canvasSize = frame;
+    doc.background = color;
+    return renderTitleMedia(doc, QStringLiteral("Color Matte %1").arg(color.name().toUpper()), out, error);
+}
+
 int restoreMissingTitles(QVector<MediaItem> &media)
 {
     int n = 0;

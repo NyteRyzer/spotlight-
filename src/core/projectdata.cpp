@@ -96,6 +96,8 @@ QJsonObject clipToJson(const Clip &c)
         fx["blurFill"] = c.fx.blurFill;
         fx["border"] = c.fx.border;
         fx["borderColor"] = c.fx.borderColor.name();
+        fx["rgbSplit"] = c.fx.rgbSplit;
+        fx["posterize"] = c.fx.posterize;
         o["fx"] = fx;
     }
     if (!c.enabled)
@@ -143,7 +145,7 @@ Clip clipFromJson(const QJsonObject &o)
     c.transform.cropTop = tf["cropT"].toDouble(0.0);
     c.transform.cropRight = tf["cropR"].toDouble(0.0);
     c.transform.cropBottom = tf["cropB"].toDouble(0.0);
-    c.motion = Motion(std::clamp(o["motion"].toInt(0), 0, int(Motion::PopIn)));
+    c.motion = Motion(std::clamp(o["motion"].toInt(0), 0, int(Motion::Shake)));
     if (o.contains("chromaKey")) {
         const QJsonObject k = o["chromaKey"].toObject();
         c.key.enabled = true;
@@ -164,6 +166,8 @@ Clip clipFromJson(const QJsonObject &o)
     c.fx.blurFill = fx["blurFill"].toBool();
     c.fx.border = fx["border"].toDouble(0.0);
     c.fx.borderColor = QColor(fx["borderColor"].toString(QStringLiteral("#ffffff")));
+    c.fx.rgbSplit = fx["rgbSplit"].toDouble(0.0);
+    c.fx.posterize = fx["posterize"].toDouble(0.0);
     c.enabled = o["enabled"].toBool(true);
     c.colorLabel = std::clamp(o["label"].toInt(0), 0, 8);
     c.name = o["name"].toString();
@@ -198,6 +202,10 @@ QJsonObject fxToJson(const AudioFx &fx)
     o["highpass"] = fx.highpassHz;
     o["chorus"] = fx.chorus;
     o["mono"] = fx.mono;
+    o["bass"] = fx.bassDb;
+    o["treble"] = fx.trebleDb;
+    o["width"] = fx.stereoWidth;
+    o["robot"] = fx.robot;
     o["duck"] = fx.duckUnderVoice;
     o["duckAmount"] = fx.duckAmountDb;
     return o;
@@ -231,6 +239,10 @@ AudioFx fxFromJson(const QJsonObject &o)
     fx.highpassHz = o["highpass"].toDouble(0.0);
     fx.chorus = o["chorus"].toBool();
     fx.mono = o["mono"].toBool();
+    fx.bassDb = o["bass"].toDouble(0.0);
+    fx.trebleDb = o["treble"].toDouble(0.0);
+    fx.stereoWidth = o["width"].toDouble(1.0);
+    fx.robot = o["robot"].toBool();
     fx.duckUnderVoice = o["duck"].toBool();
     fx.duckAmountDb = o["duckAmount"].toDouble(-12.0);
     return fx;

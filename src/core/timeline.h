@@ -97,24 +97,28 @@ struct ClipFx {
     bool blurFill = false;     // fill empty space with a blurred, zoomed copy (vertical video)
     double border = 0.0;       // outline width as a fraction of the frame height (PIP frame)
     QColor borderColor = Qt::white;
+    double rgbSplit = 0.0;     // 0 .. 1 (glitch: red and blue channels pulled apart)
+    double posterize = 0.0;    // 0 .. 1 (fewer colour levels, comic / pop-art look)
 
     bool isNone() const
     {
         return qFuzzyIsNull(sharpen) && qFuzzyIsNull(grain) && !invert && qFuzzyIsNull(pixelate) && !cinemaBars
-            && !blurFill && qFuzzyIsNull(border);
+            && !blurFill && qFuzzyIsNull(border) && qFuzzyIsNull(rgbSplit) && qFuzzyIsNull(posterize);
     }
     bool operator==(const ClipFx &o) const
     {
         return qFuzzyCompare(1 + sharpen, 1 + o.sharpen) && qFuzzyCompare(1 + grain, 1 + o.grain)
             && invert == o.invert && qFuzzyCompare(1 + pixelate, 1 + o.pixelate) && cinemaBars == o.cinemaBars
-            && blurFill == o.blurFill && qFuzzyCompare(1 + border, 1 + o.border) && borderColor == o.borderColor;
+            && blurFill == o.blurFill && qFuzzyCompare(1 + border, 1 + o.border) && borderColor == o.borderColor
+            && qFuzzyCompare(1 + rgbSplit, 1 + o.rgbSplit) && qFuzzyCompare(1 + posterize, 1 + o.posterize);
     }
 };
 
 // Animated camera moves ("Ken Burns", over the whole clip) and entrance
 // animations (over the first kEntranceSeconds, e.g. for titles).
+// Shake is a handheld-camera wobble over the whole clip.
 enum class Motion { None, ZoomIn, ZoomOut, PanLeft, PanRight, PanUp, PanDown, SlideInLeft, SlideInRight,
-                    SlideInUp, PopIn };
+                    SlideInUp, PopIn, SlideInDown, Shake };
 
 // Green/blue screen removal (FFmpeg chromakey semantics).
 struct ChromaKey {
@@ -234,6 +238,10 @@ struct AudioFx {
     double highpassHz = 0.0;      // 0 = off; thins out below the cutoff
     bool chorus = false;          // thicker, doubled sound
     bool mono = false;            // fold both channels to the centre
+    double bassDb = 0.0;          // bass boost / cut around 110 Hz, -12 .. 12
+    double trebleDb = 0.0;        // treble boost / cut around 6 kHz, -12 .. 12
+    double stereoWidth = 1.0;     // 1 = as recorded, 0 = mono, up to 2.5 = extra wide
+    bool robot = false;           // robotic, metallic voice
 
     // Auto-ducking: lower this track while clips play on any track marked
     // as a voice track (e.g. music under dialogue).
@@ -244,7 +252,8 @@ struct AudioFx {
     {
         return !eqEnabled && !compressorEnabled && !dialogueCleanup && !gateEnabled && !deEsser
             && qFuzzyIsNull(pitchSemitones) && !reverbEnabled && !echoEnabled && !limiterEnabled && !telephone
-            && qFuzzyIsNull(lowpassHz) && qFuzzyIsNull(highpassHz) && !chorus && !mono;
+            && qFuzzyIsNull(lowpassHz) && qFuzzyIsNull(highpassHz) && !chorus && !mono && qFuzzyIsNull(bassDb)
+            && qFuzzyIsNull(trebleDb) && qFuzzyCompare(stereoWidth, 1.0) && !robot;
     }
 };
 

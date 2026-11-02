@@ -39,6 +39,13 @@ QImage sharpenImage(const QImage &src, double amount);
 // Mosaic with square blocks of `block` pixels (area down, nearest up).
 QImage pixelateImage(const QImage &src, int block);
 
+// floor(v * levels / 256) * 255 / (levels - 1) per channel (FFmpeg lutrgb).
+QImage posterizeImage(const QImage &src, int levels);
+
+// Glitch: red moved left and blue moved right by `shift` pixels, edges
+// smeared (FFmpeg rgbashift edge=smear).
+QImage rgbSplitImage(const QImage &src, int shift);
+
 // Uniform per-pixel noise of +-strength/2 (FFmpeg noise alls), seeded so a
 // still frame doesn't shimmer in the preview.
 QImage addGrain(const QImage &src, double strength, quint32 seed);

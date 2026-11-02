@@ -33,6 +33,8 @@ double grainStrength(double amount);           // FFmpeg noise strength (0..100)
 int cinemaBarHeight(const QSize &picture);     // bar height for a 2.39:1 frame
 int borderPixels(double amount, int frameHeight);
 double blurFillSigma(int frameHeight);
+int rgbSplitPixels(double amount, int height); // channel offset for the glitch effect
+int posterizeLevels(double amount);            // colour levels per channel (2 .. 16)
 
 // A named one-click look ("filter" in CapCut/Filmora terms).
 struct LookPreset {
@@ -64,6 +66,7 @@ struct MotionState {
 MotionState motionAt(Motion m, double p, double elapsed = 1e9);
 constexpr double kMotionAmount = 0.18;   // zoom/pan range of a Ken Burns move
 constexpr double kEntranceSeconds = 0.6; // length of slide / pop entrances
+constexpr double kShakeAmount = 0.012;   // camera shake: offset as a fraction of the picture
 bool isEntrance(Motion m);
 
 } // namespace spotlight

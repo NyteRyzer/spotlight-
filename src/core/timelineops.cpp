@@ -1205,4 +1205,131 @@ QVector<QUuid> unusedMedia(const ProjectData &d)
     return out;
 }
 
+QVector<QUuid> clipsFrom(const ProjectData &d, TimeUs t, int trackIndex)
+{
+    QVector<QUuid> r;
+    for (int i = 0; i < d.tracks.size(); ++i) {
+        if ((trackIndex >= 0 && i != trackIndex) || d.tracks[i].locked)
+            continue;
+        for (const Clip &c : d.tracks[i].clips) {
+            if (c.start >= t)
+                r.append(c.id);
+        }
+    }
+    return r;
+}
+
+int markersAtCuts(ProjectData &d)
+{
+    const QVector<int> videos = d.videoTrackIndices();
+    QVector<TimeUs> cuts;
+    for (int i = 0; i < d.tracks.size(); ++i) {
+        if (!videos.isEmpty() && !d.tracks[i].isVideo())
+            continue;
+        for (const Clip &c : d.tracks[i].clips) {
+            if (!c.enabled)
+                continue;
+            cuts << c.start << c.end();
+        }
+    }
+    std::sort(cuts.begin(), cuts.end());
+    cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+    const TimeUs frame = TimeUs(kUsPerSecond / std::max(1.0, d.sequence.frameRate));
+    const TimeUs end = d.duration();
+    int added = 0;
+    for (TimeUs t : cuts) {
+        if (t >= end && t > 0)
+            continue; // the very end is not a cut
+        bool near = false;
+        for (const Marker &m : d.markers)
+            near = near || std::abs(m.time - t) < frame;
+        if (near)
+            continue;
+        toggleMarker(d, t, 0, QStringLiteral("Cut %1").arg(added + 1));
+        ++added;
+    }
+    return added;
+}
+
+bool swapWithNext(ProjectData &d, const QUuid &clipId)
+{
+    int ti = -1;
+    const Clip *a = d.clipById(clipId, &ti);
+    if (!a || d.tracks[ti].locked)
+        return false;
+    const Clip *b = nullptr;
+    for (const Clip &c : d.tracks[ti].clips) {
+        if (c.start >= a->end() && (!b || c.start < b->start))
+            b = &c;
+    }
+    if (!b)
+        return false;
+    const TimeUs gap = b->start - a->end();
+    // b goes where a started; a follows b after the same gap.
+    const TimeUs deltaB = a->start - b->start;
+    const TimeUs deltaA = (a->start + b->duration() + gap) - a->start;
+    QHash<QUuid, TimeUs> shift;
+    for (const QUuid &id : groupOf(d, a->id))
+        shift.insert(id, deltaA);
+    for (const QUuid &id : groupOf(d, b->id)) {
+        if (shift.contains(id))
+            return false; // linked to each other
+        shift.insert(id, deltaB);
+    }
+    ProjectData out = d;
+    for (Track &t : out.tracks) {
+        QVector<Clip> moved;
+        QVector<Clip> kept;
+        for (const Clip &c : t.clips) {
+            if (shift.contains(c.id)) {
+                if (t.locked)
+                    return false;
+                Clip m = c;
+                m.start += shift.value(c.id);
+                moved.append(m);
+            } else {
+                kept.append(c);
+            }
+        }
+        if (moved.isEmpty())
+            continue;
+        t.clips = kept;
+        for (const Clip &m : moved) {
+            for (const Clip &k : t.clips) {
+                if (m.start < k.end() && k.start < m.end())
+                    return false;
+            }
+            insertSorted(t, m);
+        }
+        for (int i = 1; i < t.clips.size(); ++i) {
+            if (t.clips[i].start < t.clips[i - 1].end())
+                return false;
+        }
+    }
+    d = out;
+    return true;
+}
+
+bool fitToFill(ProjectData &d, const QUuid &clipId, TimeUs until)
+{
+    int ti = -1;
+    const Clip *c = d.clipById(clipId, &ti);
+    if (!c || d.tracks[ti].locked || isStillClip(d, *c))
+        return false;
+    if (until < 0) {
+        for (const Clip &o : d.tracks[ti].clips) {
+            if (o.id != c->id && o.start >= c->end() && (until < 0 || o.start < until))
+                until = o.start;
+        }
+    }
+    const TimeUs room = until - c->start;
+    if (room < kMinClipDuration)
+        return false;
+    // Round the speed up a hair so the truncated duration never overruns.
+    const double speed = std::clamp(double(c->sourceDuration()) / double(room) * (1.0 + 1e-9), 0.1, 8.0);
+    if (qFuzzyCompare(speed, c->speed))
+        return false;
+    return setClipSpeed(d, clipId, speed);
+}
+
 } // namespace spotlight::timeline

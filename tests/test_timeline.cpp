@@ -649,6 +649,72 @@ private slots:
         QCOMPARE(d.clipById(a)->fadeIn, 1500 * kUsPerMs); // at most half the clip
     }
 
+    void selectForwardMarkersSwapFit()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 20 * S); // with audio: linked partners
+        const QUuid a = timeline::placeMedia(d, m, 0, 0, 0, 4 * S);
+        const QUuid b = timeline::placeMedia(d, m, 0, 5 * S, 0, 2 * S);
+        const QUuid c = timeline::placeMedia(d, m, 0, 10 * S, 0, 3 * S);
+
+        // Track Select Forward from 5 s: b, c and their audio.
+        const QVector<QUuid> fwd = timeline::clipsFrom(d, 5 * S);
+        QCOMPARE(fwd.size(), 4);
+        QVERIFY(!fwd.contains(a) && fwd.contains(b) && fwd.contains(c));
+        QCOMPARE(timeline::clipsFrom(d, 5 * S, 0).size(), 2);
+
+        // Markers at every cut: 0, 4, 5, 7, 10 (13 is the end).
+        QCOMPARE(timeline::markersAtCuts(d), 5);
+        QCOMPARE(d.markers[1].time, 4 * S);
+        QCOMPARE(timeline::markersAtCuts(d), 0); // already marked
+
+        // Swap a (4 s) and b (2 s), keeping the 1 s gap.
+        QVERIFY(timeline::swapWithNext(d, a));
+        QCOMPARE(d.clipById(b)->start, 0);
+        QCOMPARE(d.clipById(a)->start, 3 * S);
+        QCOMPARE(d.tracks[2].clips[0].start, 0); // b's audio moved along
+        QCOMPARE(d.tracks[2].clips[1].start, 3 * S);
+        checkInvariants(d);
+        QVERIFY(!timeline::swapWithNext(d, c)); // nothing after c
+
+        // Fit to Fill: b (2 s of source) stretched to end where a starts (3 s).
+        QVERIFY(timeline::fitToFill(d, b));
+        QVERIFY(std::abs(d.clipById(b)->speed - 2.0 / 3.0) < 1e-6);
+        QVERIFY(d.clipById(b)->end() <= 3 * S && d.clipById(b)->end() > 3 * S - 10);
+        QCOMPARE(d.clipById(a)->start, 3 * S); // nothing pushed
+        checkInvariants(d);
+    }
+
+    void colorMatteAndLayerStyle()
+    {
+        MediaItem matte;
+        QVERIFY(titles::renderColorMatte(QColor(20, 40, 200), QSize(64, 36), &matte));
+        QVERIFY(matte.isTitle() && matte.isStill());
+        QImage img(matte.path);
+        QCOMPARE(img.size(), QSize(64, 36));
+        QCOMPARE(QColor(img.pixel(10, 10)), QColor(20, 40, 200));
+        QFile::remove(matte.path);
+
+        DesignLayer a, b, img2;
+        a.type = b.type = LayerType::Text;
+        a.glow = true;
+        a.textColor = Qt::red;
+        a.fontSize = 140;
+        a.text = "A";
+        b.text = "B";
+        b.position = QPointF(50, 60);
+        pasteLayerStyle(a, b);
+        QVERIFY(b.glow);
+        QCOMPARE(b.textColor, QColor(Qt::red));
+        QCOMPARE(b.fontSize, 140);
+        QCOMPARE(b.text, QStringLiteral("B"));          // content kept
+        QCOMPARE(b.position, QPointF(50, 60));          // position kept
+        img2.type = LayerType::Image;
+        pasteLayerStyle(a, img2);
+        QVERIFY(img2.glow);
+        QCOMPARE(img2.fontSize, DesignLayer().fontSize); // text styling not applied
+    }
+
     void youtubeChaptersAndCollect()
     {
         ProjectData d = ProjectData::createDefault();

@@ -210,6 +210,24 @@ QVector<CopyPlan> collectPlan(const ProjectData &d, const QString &folder);
 // Media items no clip uses.
 QVector<QUuid> unusedMedia(const ProjectData &d);
 
+// Track Select Forward: every clip on unlocked tracks that starts at or
+// after t (only `trackIndex` when >= 0).
+QVector<QUuid> clipsFrom(const ProjectData &d, TimeUs t, int trackIndex = -1);
+
+// Adds a marker at every cut (clip start/end on the video tracks, or on all
+// tracks when there is no video) that doesn't have one within a frame.
+// Returns how many were added.
+int markersAtCuts(ProjectData &d);
+
+// Swaps a clip with the next clip on its track (partners move along),
+// keeping the gap between them. False if there is no next clip or the
+// partners would collide on their tracks.
+bool swapWithNext(ProjectData &d, const QUuid &clipId);
+
+// Fit to Fill: changes the clip's speed so it ends exactly where the next
+// clip on its track starts (or at `until` when given). False if impossible.
+bool fitToFill(ProjectData &d, const QUuid &clipId, TimeUs until = -1);
+
 // Splits a clip (and partners) at every time in `cuts` that falls inside it.
 int splitAtTimes(ProjectData &d, const QUuid &clipId, const QVector<TimeUs> &cuts);
 
