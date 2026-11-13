@@ -59,15 +59,33 @@ jobs:
 
   macos:
     name: macOS (Apple Silicon)
-    runs-on: macos-14
+    # Built like the Intel job: the official Qt 6.8 LTS binaries (macOS 12+)
+    # and static FFmpeg, so the app doesn't inherit the runner's Homebrew
+    # minimum macOS. (The macos-14 runner image is no longer available.)
+    runs-on: macos-15
+    env:
+      QT_VERSION: '6.8.3'
     steps:
       - uses: actions/checkout@v5
-      - name: Install dependencies
-        run: brew install qt ffmpeg ninja
+      - name: Install build tools
+        run: |
+          brew install ninja
+          python3 -m pip install --break-system-packages aqtinstall
+      - name: Install Qt ${{ env.QT_VERSION }}
+        run: |
+          python3 -m aqt install-qt mac desktop "$QT_VERSION" clang_64 -m qtmultimedia --outputdir "$HOME/Qt"
+          echo "QT_PREFIX=$HOME/Qt/$QT_VERSION/macos" >> "$GITHUB_ENV"
+      - name: Fetch static FFmpeg
+        run: |
+          packaging/macos/fetch-ffmpeg.sh "$HOME/ffmpeg-static" arm64
+          echo "FFMPEG_BIN=$HOME/ffmpeg-static" >> "$GITHUB_ENV"
+          echo "$HOME/ffmpeg-static" >> "$GITHUB_PATH"
       - name: App icon
         run: packaging/macos/make-icns.sh
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_OSX_ARCHITECTURES=arm64
       - name: Build
         run: cmake --build build
       - name: Test
@@ -76,8 +94,20 @@ jobs:
           QT_QPA_PLATFORM: offscreen
       - name: Package (.dmg)
         run: packaging/macos/build-dmg.sh build-dmg
+        env:
+          DEPLOY_TARGET: '12.0'
+          DMG_LABEL: arm64
+      - name: Check architecture and minimum macOS
+        run: |
+          APP=build-dmg/dmg/SPOTLIGHT.app
+          lipo -archs "$APP/Contents/MacOS/SPOTLIGHT"
+          lipo -archs "$APP/Contents/MacOS/SPOTLIGHT" | grep -qw arm64
+          vtool -show-build "$APP/Contents/MacOS/SPOTLIGHT" | grep -E 'minos|version' | head -3
       - name: Verify the .dmg (signature, self-test, launch)
-        run: packaging/macos/verify-dmg.sh build-dmg/*.dmg arm64
+        run: |
+          # Hide the build machine's FFmpeg so the app must use its bundled copy.
+          rm -rf "$HOME/ffmpeg-static"
+          packaging/macos/verify-dmg.sh build-dmg/*.dmg arm64
       - uses: actions/upload-artifact@v4
         with:
           name: spotlight-macos
@@ -168,7 +198,7 @@ jobs:
           body: |
             Downloads for SPOTLIGHT! — all-in-one video, audio and design studio.
 
-            **macOS — Apple Silicon (M1/M2/M3/M4…, macOS 14 Sonoma or newer)** — `SPOTLIGHT-*-macOS-arm64.dmg`
+            **macOS — Apple Silicon (M1/M2/M3/M4…, macOS 12 Monterey or newer)** — `SPOTLIGHT-*-macOS-arm64.dmg`
             **macOS — Intel (macOS 12 Monterey or newer)** — `SPOTLIGHT-*-macOS-Intel.dmg`
             Not sure which? Apple menu → About This Mac: "Chip: Apple M…" = Apple Silicon, "Processor: Intel" = Intel.
             Open the .dmg and drag SPOTLIGHT! to Applications. The app isn't notarized yet, so the first time

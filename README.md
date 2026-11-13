@@ -123,7 +123,7 @@ Get the latest build from the **[Releases page](https://github.com/NyteRyzer/spo
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS 14+ (Apple Silicon) | `SPOTLIGHT-<ver>-macOS-arm64.dmg` | Drag to Applications. Not notarized yet: on first launch use **System Settings → Privacy & Security → Open Anyway**. |
+| macOS 12+ (Apple Silicon) | `SPOTLIGHT-<ver>-macOS-arm64.dmg` | Drag to Applications. Not notarized yet: on first launch use **System Settings → Privacy & Security → Open Anyway**. |
 | macOS 12+ (Intel) | `SPOTLIGHT-<ver>-macOS-Intel.dmg` | Same as above. |
 | Linux x86_64 (2024+ distros) | `SPOTLIGHT-<ver>-x86_64.AppImage` | `chmod +x` and run, nothing to install. |
 | Ubuntu 24.04 / Debian 13 | `spotlight-<ver>-linux-x86_64.deb` | `sudo apt install ./spotlight-*.deb` |
