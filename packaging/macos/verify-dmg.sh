@@ -43,12 +43,16 @@ done
 echo "== Static dependency scan"
 # Every Mach-O file may only link the OS or something inside the bundle.
 bad=0
+# Universal (fat) files list each architecture under its own "<file> (architecture x):"
+# header; read only the slice we ship, and never mistake a header for a load.
+ARCHFLAG=()
+[ -n "$ARCH" ] && ARCHFLAG=(-arch "$ARCH")
 while IFS= read -r f; do
   [[ "$(file -b "$f")" == *Mach-O* ]] || continue
-  own="$(otool -D "$f" 2>/dev/null | tail -n +2 | head -1)" # a library's own install name isn't a load
-  deps="$(otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -vxF "${own:-<none>}" \
+  own="$(otool ${ARCHFLAG[@]+"${ARCHFLAG[@]}"} -D "$f" 2>/dev/null | grep -v ':$' | head -1 || true)" # a library's own install name isn't a load
+  deps="$(otool ${ARCHFLAG[@]+"${ARCHFLAG[@]}"} -L "$f" | grep -v ':$' | awk '{print $1}' | grep -vxF "${own:-<none>}" \
           | grep -vE '^(@rpath|@loader_path|@executable_path|/usr/lib/|/System/)' || true)"
-  rpaths="$(otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -v '^@' || true)"
+  rpaths="$(otool ${ARCHFLAG[@]+"${ARCHFLAG[@]}"} -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -v '^@' || true)"
   if [ -n "$deps$rpaths" ]; then
     echo "outside reference in ${f#$APP/}:"; echo "$deps" "$rpaths" | sed 's/^/    /'
     bad=1
