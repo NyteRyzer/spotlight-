@@ -29,6 +29,8 @@ struct ColorAdjust {
     double blur = 0.0;        //  0 .. 1 (Gaussian, up to ~2% of the frame height)
     double hue = 0.0;         // degrees, rotation about the grey axis (part of the matrix)
     double gamma = 1.0;       // midtones: 0.3 (darker) .. 3 (brighter), FFmpeg eq gamma
+    double colorize = 0.0;    // 0 .. 1: map brightness onto colorizeColor (duotone, part of the matrix)
+    QColor colorizeColor = QColor(255, 140, 40);
 
     bool isEqIdentity() const
     {
@@ -38,7 +40,7 @@ struct ColorAdjust {
     bool hasMatrix() const
     {
         return !qFuzzyIsNull(temperature) || !qFuzzyIsNull(tint) || mono != MonoMode::None
-            || !qFuzzyIsNull(std::fmod(hue, 360.0));
+            || !qFuzzyIsNull(std::fmod(hue, 360.0)) || colorize > 0;
     }
     bool isIdentity() const
     {
@@ -50,7 +52,8 @@ struct ColorAdjust {
             && qFuzzyCompare(saturation, o.saturation) && qFuzzyCompare(1 + temperature, 1 + o.temperature)
             && qFuzzyCompare(1 + tint, 1 + o.tint) && mono == o.mono && qFuzzyCompare(1 + vignette, 1 + o.vignette)
             && qFuzzyCompare(1 + blur, 1 + o.blur) && qFuzzyCompare(1 + hue, 1 + o.hue)
-            && qFuzzyCompare(gamma, o.gamma);
+            && qFuzzyCompare(gamma, o.gamma) && qFuzzyCompare(1 + colorize, 1 + o.colorize)
+            && (colorize <= 0 || colorizeColor == o.colorizeColor);
     }
     bool operator!=(const ColorAdjust &o) const { return !(*this == o); }
 };
@@ -99,26 +102,31 @@ struct ClipFx {
     QColor borderColor = Qt::white;
     double rgbSplit = 0.0;     // 0 .. 1 (glitch: red and blue channels pulled apart)
     double posterize = 0.0;    // 0 .. 1 (fewer colour levels, comic / pop-art look)
+    double threshold = 0.0;    // 0 = off, else the luma cut (0..1) of a black & white stencil
+    bool denoise = false;      // remove video noise / grain (export only, like stabilize)
 
     bool isNone() const
     {
         return qFuzzyIsNull(sharpen) && qFuzzyIsNull(grain) && !invert && qFuzzyIsNull(pixelate) && !cinemaBars
-            && !blurFill && qFuzzyIsNull(border) && qFuzzyIsNull(rgbSplit) && qFuzzyIsNull(posterize);
+            && !blurFill && qFuzzyIsNull(border) && qFuzzyIsNull(rgbSplit) && qFuzzyIsNull(posterize)
+            && qFuzzyIsNull(threshold) && !denoise;
     }
     bool operator==(const ClipFx &o) const
     {
         return qFuzzyCompare(1 + sharpen, 1 + o.sharpen) && qFuzzyCompare(1 + grain, 1 + o.grain)
             && invert == o.invert && qFuzzyCompare(1 + pixelate, 1 + o.pixelate) && cinemaBars == o.cinemaBars
             && blurFill == o.blurFill && qFuzzyCompare(1 + border, 1 + o.border) && borderColor == o.borderColor
+            && qFuzzyCompare(1 + threshold, 1 + o.threshold) && denoise == o.denoise
             && qFuzzyCompare(1 + rgbSplit, 1 + o.rgbSplit) && qFuzzyCompare(1 + posterize, 1 + o.posterize);
     }
 };
 
 // Animated camera moves ("Ken Burns", over the whole clip) and entrance
 // animations (over the first kEntranceSeconds, e.g. for titles).
-// Shake is a handheld-camera wobble over the whole clip.
+// Shake is a handheld-camera wobble over the whole clip; Pulse is a quick
+// zoom "thump" twice a second (120 BPM), for music edits.
 enum class Motion { None, ZoomIn, ZoomOut, PanLeft, PanRight, PanUp, PanDown, SlideInLeft, SlideInRight,
-                    SlideInUp, PopIn, SlideInDown, Shake };
+                    SlideInUp, PopIn, SlideInDown, Shake, Pulse };
 
 // Green/blue screen removal (FFmpeg chromakey semantics).
 struct ChromaKey {
@@ -202,6 +210,10 @@ inline QVector<QColor> clipLabelColors()
 
 enum class TrackType { Video, Audio };
 
+// How a video track combines with the tracks below it. The non-normal modes
+// leave black parts of the track see-through (light leaks, fire, sparks).
+enum class TrackBlend { Normal, Screen, Add, Lighten };
+
 // Export-time audio processing for a track (Audio Studio).
 struct AudioFx {
     bool eqEnabled = false;
@@ -242,6 +254,9 @@ struct AudioFx {
     double trebleDb = 0.0;        // treble boost / cut around 6 kHz, -12 .. 12
     double stereoWidth = 1.0;     // 1 = as recorded, 0 = mono, up to 2.5 = extra wide
     bool robot = false;           // robotic, metallic voice
+    bool karaoke = false;         // vocal remover: cancels what's in the centre of a stereo mix
+    bool flanger = false;         // jet / whoosh sweep
+    bool tremolo = false;         // pulsing volume
 
     // Auto-ducking: lower this track while clips play on any track marked
     // as a voice track (e.g. music under dialogue).
@@ -253,7 +268,8 @@ struct AudioFx {
         return !eqEnabled && !compressorEnabled && !dialogueCleanup && !gateEnabled && !deEsser
             && qFuzzyIsNull(pitchSemitones) && !reverbEnabled && !echoEnabled && !limiterEnabled && !telephone
             && qFuzzyIsNull(lowpassHz) && qFuzzyIsNull(highpassHz) && !chorus && !mono && qFuzzyIsNull(bassDb)
-            && qFuzzyIsNull(trebleDb) && qFuzzyCompare(stereoWidth, 1.0) && !robot;
+            && qFuzzyIsNull(trebleDb) && qFuzzyCompare(stereoWidth, 1.0) && !robot && !karaoke && !flanger
+            && !tremolo;
     }
 };
 
@@ -267,6 +283,7 @@ struct Track {
     double volume = 1.0;  // linear, audio only
     double pan = 0.0;     // -1 (left) .. 1 (right), audio only
     bool voice = false;   // audio: dialogue track that ducks tracks with duckUnderVoice
+    TrackBlend blend = TrackBlend::Normal; // video only
     AudioFx fx;
     QVector<Clip> clips;  // kept sorted by start, never overlapping
 

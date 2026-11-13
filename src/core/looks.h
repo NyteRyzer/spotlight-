@@ -35,6 +35,7 @@ int borderPixels(double amount, int frameHeight);
 double blurFillSigma(int frameHeight);
 int rgbSplitPixels(double amount, int height); // channel offset for the glitch effect
 int posterizeLevels(double amount);            // colour levels per channel (2 .. 16)
+int thresholdLevel(double amount);             // 0..255 luma cut of the stencil effect
 
 // A named one-click look ("filter" in CapCut/Filmora terms).
 struct LookPreset {
@@ -67,6 +68,8 @@ MotionState motionAt(Motion m, double p, double elapsed = 1e9);
 constexpr double kMotionAmount = 0.18;   // zoom/pan range of a Ken Burns move
 constexpr double kEntranceSeconds = 0.6; // length of slide / pop entrances
 constexpr double kShakeAmount = 0.012;   // camera shake: offset as a fraction of the picture
+constexpr double kPulseBeat = 0.5;       // beat pulse: seconds per beat (120 BPM)
+constexpr double kPulseAmount = 0.06;    // beat pulse: zoom at the start of each beat
 bool isEntrance(Motion m);
 
 } // namespace spotlight

@@ -97,6 +97,11 @@ QStringList audioFxChain(const AudioFx &fx, int sr)
         chain << QStringLiteral("bass=g=%1:f=110").arg(num(std::clamp(fx.bassDb, -12.0, 12.0)));
     if (!qFuzzyIsNull(fx.trebleDb))
         chain << QStringLiteral("treble=g=%1:f=6000").arg(num(std::clamp(fx.trebleDb, -12.0, 12.0)));
+    if (fx.karaoke) {
+        // Subtracting the channels cancels everything mixed to the centre
+        // (usually the lead vocal); the result is played on both sides.
+        chain << QStringLiteral("pan=stereo|c0=0.5*c0-0.5*c1|c1=0.5*c1-0.5*c0");
+    }
     if (fx.robot) {
         // Zeroing the phase of every FFT bin gives the classic robot voice.
         chain << QStringLiteral("afftfilt=real='hypot(re\\,im)':imag='0':win_size=512:overlap=0.75");
@@ -120,6 +125,10 @@ QStringList audioFxChain(const AudioFx &fx, int sr)
     }
     if (!qFuzzyCompare(fx.stereoWidth, 1.0))
         chain << QStringLiteral("extrastereo=m=%1").arg(num(std::clamp(fx.stereoWidth, 0.0, 2.5)));
+    if (fx.flanger)
+        chain << QStringLiteral("flanger=delay=2:depth=4:speed=0.4:width=70");
+    if (fx.tremolo)
+        chain << QStringLiteral("tremolo=f=6:d=0.6");
     if (fx.chorus)
         chain << QStringLiteral("chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3");
     if (fx.echoEnabled) {
@@ -231,6 +240,11 @@ MotionExpr motionExpr(Motion m, TimeUs duration)
         e.fy = QStringLiteral("(-pow(1-%1\\,3))").arg(e0);
         break;
     }
+    case Motion::Pulse: {
+        const QString f = QStringLiteral("(1-mod(t\\,%1)/%1)").arg(num(kPulseBeat));
+        e.zoom = QStringLiteral("(1+%1*%2*%2)").arg(num(kPulseAmount), f);
+        break;
+    }
     case Motion::Shake: {
         // Mirrors motionAt().
         const QString k = num(kShakeAmount);
@@ -275,6 +289,8 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
                .arg(qFuzzyCompare(c.speed, 1.0) || m.isStill() ? QString() : QStringLiteral("/") + num(c.speed));
     if (c.stabilize && !m.isStill())
         pre << QStringLiteral("deshake");
+    if (c.fx.denoise)
+        pre << QStringLiteral("hqdn3d=4:3:6:4.5");
     pre << QStringLiteral("fps=%1").arg(num(fps));
     if (hold > 0)
         pre << QStringLiteral("tpad=stop_mode=clone:stop_duration=%1").arg(secs(hold));
@@ -338,6 +354,12 @@ QString buildClipPiece(GraphBuilder &g, const ProjectData &d, const Clip &c, con
         const QString L = QString::number(posterizeLevels(fx.posterize));
         const QString q = QStringLiteral("'floor(val*%1/256)*255/(%1-1)'").arg(L);
         ch << QStringLiteral("format=rgb24") << QStringLiteral("lutrgb=r=%1:g=%1:b=%1").arg(q);
+    }
+    if (fx.threshold > 0) {
+        // Black & white stencil: luma above the cut turns white, below black.
+        const QString q = QStringLiteral("'if(gt(val\\,%1)\\,255\\,0)'").arg(thresholdLevel(fx.threshold));
+        ch << QStringLiteral("hue=s=0") << QStringLiteral("format=rgb24")
+           << QStringLiteral("lutrgb=r=%1:g=%1:b=%1").arg(q);
     }
     if (fx.rgbSplit > 0) {
         const int sh = rgbSplitPixels(fx.rgbSplit, fit.height());
@@ -542,7 +564,24 @@ QStringList Exporter::buildArguments(const ProjectData &project, const ExportPre
                 continue;
             const QString trackOut = buildVideoTrack(g, d, t, ti, QSize(W, H), fps);
             const QString next = QStringLiteral("[vl%1]").arg(layer++);
-            g.filters << acc + trackOut + QStringLiteral("overlay=format=auto:eof_action=pass") + next;
+            if (t.blend == TrackBlend::Normal) {
+                g.filters << acc + trackOut + QStringLiteral("overlay=format=auto:eof_action=pass") + next;
+            } else {
+                // Blend modes work on RGB with the track's transparent parts
+                // premultiplied to black, which these modes leave unchanged.
+                // The track is padded with black to the full length.
+                const QString mode = t.blend == TrackBlend::Screen ? QStringLiteral("screen")
+                    : t.blend == TrackBlend::Add                  ? QStringLiteral("addition")
+                                                                  : QStringLiteral("lighten");
+                const QString a = QStringLiteral("[bla%1]").arg(layer), b = QStringLiteral("[blb%1]").arg(layer);
+                g.filters << acc + QStringLiteral("format=gbrp") + a;
+                g.filters << trackOut
+                        + QStringLiteral("format=rgba,premultiply=inplace=1,format=gbrp,"
+                                         "tpad=stop_mode=add:stop_duration=%1:color=black")
+                              .arg(secs(total))
+                        + b;
+                g.filters << a + b + QStringLiteral("blend=all_mode=%1:shortest=1,format=yuva420p").arg(mode) + next;
+            }
             acc = next;
         }
         g.filters << acc + QStringLiteral("format=yuv420p[vout]");

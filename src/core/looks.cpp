@@ -64,6 +64,19 @@ ColorMatrix colorMatrix(const ColorAdjust &c)
                             0.072 + co * 0.928 + si * 0.072};
         m = multiply(h, m);
     }
+    if (c.colorize > 0) {
+        // Luma mapped onto the colour (black stays black, white becomes the
+        // colour), blended with the picture by `colorize`.
+        const double a = std::clamp(c.colorize, 0.0, 1.0);
+        const double cr = c.colorizeColor.redF(), cg = c.colorizeColor.greenF(), cb = c.colorizeColor.blueF();
+        const double L[3] = {0.2126, 0.7152, 0.0722};
+        const double col[3] = {cr, cg, cb};
+        ColorMatrix z{};
+        for (int r = 0; r < 3; ++r)
+            for (int k = 0; k < 3; ++k)
+                z[r * 3 + k] = (1 - a) * (r == k ? 1.0 : 0.0) + a * col[r] * L[k];
+        m = multiply(z, m);
+    }
     return m;
 }
 
@@ -103,6 +116,11 @@ int rgbSplitPixels(double amount, int height)
     return std::max(1, int(std::lround(std::clamp(amount, 0.0, 1.0) * height / 40.0)));
 }
 
+int thresholdLevel(double amount)
+{
+    return std::clamp(int(std::lround(std::clamp(amount, 0.0, 1.0) * 255)), 1, 254);
+}
+
 int posterizeLevels(double amount)
 {
     return std::clamp(int(std::lround(16 - std::clamp(amount, 0.0, 1.0) * 14)), 2, 16);
@@ -134,6 +152,9 @@ QVector<LookPreset> lookPresets()
         {tr("Black & White"), adj(0.0, 1.1, 1.0, 0, 0, MonoMode::BlackWhite)},
         {tr("Noir"), adj(-0.02, 1.4, 1.0, 0, 0, MonoMode::BlackWhite, 0.6)},
         {tr("Sepia"), adj(0.02, 1.0, 1.0, 0, 0, MonoMode::Sepia, 0.3)},
+        {tr("Teal & Orange"), adj(0.0, 1.15, 1.2, 0.35, -0.15, MonoMode::None, 0.2)},
+        {tr("Golden Hour"), adj(0.04, 1.05, 1.15, 0.75, 0.05, MonoMode::None, 0.25)},
+        {tr("Matrix"), adj(-0.03, 1.2, 0.75, -0.2, 0.7, MonoMode::None, 0.3)},
     };
 }
 
@@ -167,7 +188,7 @@ QStringList motionNames()
     return {tr("None"),          tr("Zoom In"),        tr("Zoom Out"),     tr("Pan Left"),
             tr("Pan Right"),     tr("Pan Up"),         tr("Pan Down"),     tr("Slide In from Left"),
             tr("Slide In from Right"), tr("Slide In from Bottom"), tr("Pop In"), tr("Drop In from Top"),
-            tr("Camera Shake")};
+            tr("Camera Shake"), tr("Beat Pulse (120 BPM)")};
 }
 
 bool isEntrance(Motion m)
@@ -234,6 +255,13 @@ MotionState motionAt(Motion m, double p, double elapsed)
         s.zoom = 1.0 + 4 * kShakeAmount;
         s.dx = kShakeAmount * (std::sin(2 * M_PI * 3.1 * t) + 0.6 * std::sin(2 * M_PI * 7.3 * t));
         s.dy = kShakeAmount * (std::sin(2 * M_PI * 2.3 * t + 1.0) + 0.6 * std::sin(2 * M_PI * 6.1 * t));
+        break;
+    }
+    case Motion::Pulse: {
+        // A thump on every beat that decays quadratically. Mirrored by the exporter.
+        const double t = elapsed > 1e8 ? 0.0 : elapsed;
+        const double f = 1.0 - std::fmod(t, kPulseBeat) / kPulseBeat;
+        s.zoom = 1.0 + kPulseAmount * f * f;
         break;
     }
     }

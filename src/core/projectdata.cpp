@@ -51,6 +51,10 @@ QJsonObject clipToJson(const Clip &c)
         col["blur"] = c.color.blur;
         col["hue"] = c.color.hue;
         col["gamma"] = c.color.gamma;
+        if (c.color.colorize > 0) {
+            col["colorize"] = c.color.colorize;
+            col["colorizeColor"] = c.color.colorizeColor.name();
+        }
         o["color"] = col;
     }
     if (!c.transform.isIdentity()) {
@@ -98,6 +102,8 @@ QJsonObject clipToJson(const Clip &c)
         fx["borderColor"] = c.fx.borderColor.name();
         fx["rgbSplit"] = c.fx.rgbSplit;
         fx["posterize"] = c.fx.posterize;
+        fx["threshold"] = c.fx.threshold;
+        fx["denoise"] = c.fx.denoise;
         o["fx"] = fx;
     }
     if (!c.enabled)
@@ -133,6 +139,8 @@ Clip clipFromJson(const QJsonObject &o)
     c.color.blur = col["blur"].toDouble(0.0);
     c.color.hue = col["hue"].toDouble(0.0);
     c.color.gamma = col["gamma"].toDouble(1.0);
+    c.color.colorize = col["colorize"].toDouble(0.0);
+    c.color.colorizeColor = QColor(col["colorizeColor"].toString(QStringLiteral("#ff8c28")));
     const QJsonObject tf = o["transform"].toObject();
     c.transform.scale = tf["scale"].toDouble(1.0);
     c.transform.x = tf["x"].toDouble(0.0);
@@ -145,7 +153,7 @@ Clip clipFromJson(const QJsonObject &o)
     c.transform.cropTop = tf["cropT"].toDouble(0.0);
     c.transform.cropRight = tf["cropR"].toDouble(0.0);
     c.transform.cropBottom = tf["cropB"].toDouble(0.0);
-    c.motion = Motion(std::clamp(o["motion"].toInt(0), 0, int(Motion::Shake)));
+    c.motion = Motion(std::clamp(o["motion"].toInt(0), 0, int(Motion::Pulse)));
     if (o.contains("chromaKey")) {
         const QJsonObject k = o["chromaKey"].toObject();
         c.key.enabled = true;
@@ -168,6 +176,8 @@ Clip clipFromJson(const QJsonObject &o)
     c.fx.borderColor = QColor(fx["borderColor"].toString(QStringLiteral("#ffffff")));
     c.fx.rgbSplit = fx["rgbSplit"].toDouble(0.0);
     c.fx.posterize = fx["posterize"].toDouble(0.0);
+    c.fx.threshold = fx["threshold"].toDouble(0.0);
+    c.fx.denoise = fx["denoise"].toBool();
     c.enabled = o["enabled"].toBool(true);
     c.colorLabel = std::clamp(o["label"].toInt(0), 0, 8);
     c.name = o["name"].toString();
@@ -206,6 +216,9 @@ QJsonObject fxToJson(const AudioFx &fx)
     o["treble"] = fx.trebleDb;
     o["width"] = fx.stereoWidth;
     o["robot"] = fx.robot;
+    o["karaoke"] = fx.karaoke;
+    o["flanger"] = fx.flanger;
+    o["tremolo"] = fx.tremolo;
     o["duck"] = fx.duckUnderVoice;
     o["duckAmount"] = fx.duckAmountDb;
     return o;
@@ -243,6 +256,9 @@ AudioFx fxFromJson(const QJsonObject &o)
     fx.trebleDb = o["treble"].toDouble(0.0);
     fx.stereoWidth = o["width"].toDouble(1.0);
     fx.robot = o["robot"].toBool();
+    fx.karaoke = o["karaoke"].toBool();
+    fx.flanger = o["flanger"].toBool();
+    fx.tremolo = o["tremolo"].toBool();
     fx.duckUnderVoice = o["duck"].toBool();
     fx.duckAmountDb = o["duckAmount"].toDouble(-12.0);
     return fx;
@@ -396,6 +412,8 @@ QJsonObject ProjectData::toJson(const QString &projectDir) const
         o["pan"] = t.pan;
         if (t.voice)
             o["voice"] = true;
+        if (t.blend != TrackBlend::Normal)
+            o["blend"] = int(t.blend);
         if (t.isAudio())
             o["fx"] = fxToJson(t.fx);
         QJsonArray clips;
@@ -493,6 +511,7 @@ bool ProjectData::fromJson(const QJsonObject &root, ProjectData *out, QString *e
         t.volume = o["volume"].toDouble(1.0);
         t.pan = o["pan"].toDouble(0.0);
         t.voice = o["voice"].toBool();
+        t.blend = TrackBlend(std::clamp(o["blend"].toInt(0), 0, int(TrackBlend::Lighten)));
         t.fx = fxFromJson(o["fx"].toObject());
         for (const auto &cv : o["clips"].toArray())
             t.clips.append(clipFromJson(cv.toObject()));

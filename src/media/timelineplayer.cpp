@@ -340,6 +340,7 @@ void TimelinePlayer::syncVideo(bool forceSeek)
             continue;
         }
         vt.layer.alpha = timeline::videoAlpha(track, clip, m_pos);
+        vt.blend = track.blend;
         const Transition tr = timeline::effectiveTransition(track, clip);
         const Clip *prev = tr.isNone() ? nullptr : timeline::previousAdjacent(track, clip);
         if (prev && !prev->enabled)

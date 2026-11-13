@@ -42,6 +42,9 @@ QImage pixelateImage(const QImage &src, int block);
 // floor(v * levels / 256) * 255 / (levels - 1) per channel (FFmpeg lutrgb).
 QImage posterizeImage(const QImage &src, int levels);
 
+// Black & white stencil: Rec.601 luma above `level` (0..255) turns white.
+QImage thresholdImage(const QImage &src, int level);
+
 // Glitch: red moved left and blue moved right by `shift` pixels, edges
 // smeared (FFmpeg rgbashift edge=smear).
 QImage rgbSplitImage(const QImage &src, int shift);

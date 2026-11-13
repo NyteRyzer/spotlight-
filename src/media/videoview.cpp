@@ -132,7 +132,11 @@ QImage VideoView::processed(const ViewLayer &l, const QSize &target, bool cache)
                                     .arg(c.fx.pixelate)
                                     .arg(target.height())
                                     .arg(c.fx.posterize)
-                                    .arg(c.fx.rgbSplit)));
+                                    .arg(c.fx.rgbSplit))
+                           + QStringLiteral(",%1,%2,%3")
+                                 .arg(c.fx.threshold)
+                                 .arg(c.color.colorize)
+                                 .arg(c.color.colorizeColor.rgb()));
         auto it = m_cache.constFind(id);
         if (it != m_cache.constEnd() && it->key == key)
             return it->image;
@@ -160,6 +164,8 @@ QImage VideoView::processed(const ViewLayer &l, const QSize &target, bool cache)
         img = pixelateImage(img, pixelBlock(fx.pixelate, img.height()));
     if (fx.posterize > 0)
         img = posterizeImage(img, posterizeLevels(fx.posterize));
+    if (fx.threshold > 0)
+        img = thresholdImage(img, thresholdLevel(fx.threshold));
     if (fx.rgbSplit > 0)
         img = rgbSplitImage(img, rgbSplitPixels(fx.rgbSplit, img.height()));
     if (fx.grain > 0)
@@ -382,11 +388,19 @@ void VideoView::drawTransition(QPainter &p, const ViewTrack &t, const QSize &can
 void VideoView::composite(QPainter &p, const QSize &canvas, double scale, bool forDisplay) const
 {
     for (const ViewTrack &t : m_tracks) {
+        p.save();
+        switch (t.blend) {
+        case TrackBlend::Screen: p.setCompositionMode(QPainter::CompositionMode_Screen); break;
+        case TrackBlend::Add: p.setCompositionMode(QPainter::CompositionMode_Plus); break;
+        case TrackBlend::Lighten: p.setCompositionMode(QPainter::CompositionMode_Lighten); break;
+        default: break;
+        }
         if (t.inTransition) {
             drawTransition(p, t, canvas, scale, forDisplay);
         } else {
             drawLayer(p, t.layer, canvas, scale, forDisplay);
         }
+        p.restore();
     }
 }
 

@@ -256,6 +256,58 @@ private slots:
         QVERIFY2(g.red() > 70 && g.red() < 120, qPrintable(g.name()));
     }
 
+    void thresholdColorizeBlendAndAudioFx()
+    {
+        const QString ffmpeg = Exporter::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg not installed", "");
+        QTemporaryDir tmp;
+        QString log;
+        const QString dark = tmp.path() + "/dark.mp4", light = tmp.path() + "/light.mp4";
+        const QString blue = tmp.path() + "/blue.mp4", red = tmp.path() + "/red.mp4";
+        QVERIFY(makeMedia(ffmpeg, dark, "color=c=0x606060:s=320x180:r=25", 2));
+        QVERIFY(makeMedia(ffmpeg, light, "color=c=0xb0b0b0:s=320x180:r=25", 2));
+        QVERIFY(makeMedia(ffmpeg, blue, "color=c=0x0000ff:s=320x180:r=25", 3));
+        QVERIFY(makeMedia(ffmpeg, red, "color=c=0xff0000:s=320x180:r=25", 1));
+
+        // Threshold at 50%: 0x60 -> black, 0xb0 -> white. Colorize to red.
+        ProjectData d = ProjectData::createDefault();
+        const QUuid md = addFile(d, dark, 2 * S, {320, 180});
+        const QUuid ml = addFile(d, light, 2 * S, {320, 180});
+        const QUuid a = timeline::placeMedia(d, md, 0, 0, 0, S);
+        const QUuid b = timeline::placeMedia(d, ml, 0, S, 0, S);
+        const QUuid c = timeline::placeMedia(d, ml, 0, 2 * S, 0, S);
+        d.clipById(a)->fx.threshold = 0.5;
+        d.clipById(b)->fx.threshold = 0.5;
+        d.clipById(b)->fx.denoise = true;
+        d.clipById(c)->color.colorize = 1.0;
+        d.clipById(c)->color.colorizeColor = QColor(255, 0, 0);
+        d.clipById(c)->motion = Motion::Pulse;
+        AudioFx &fx = d.tracks[d.audioTrackIndices()[0]].fx;
+        fx.karaoke = fx.flanger = fx.tremolo = true;
+        QVERIFY2(render(d, smallPreset(), tmp.path() + "/t.mp4", &log), qPrintable(log));
+        const QColor k = pixelAt(ffmpeg, tmp.path() + "/t.mp4", 0.5, 160, 90, 320, 180);
+        QVERIFY2(k.red() < 30 && k.green() < 30 && k.blue() < 30, qPrintable(k.name()));
+        const QColor w = pixelAt(ffmpeg, tmp.path() + "/t.mp4", 1.5, 160, 90, 320, 180);
+        QVERIFY2(w.red() > 225 && w.green() > 225 && w.blue() > 225, qPrintable(w.name()));
+        const QColor r = pixelAt(ffmpeg, tmp.path() + "/t.mp4", 2.5, 160, 90, 320, 180);
+        QVERIFY2(r.red() > 110 && r.green() < 40 && r.blue() < 40, qPrintable(r.name())); // 0xb0 grey -> dark red
+
+        // Screen blend: red over blue = magenta while V2 plays, blue after.
+        ProjectData e = ProjectData::createDefault();
+        const QUuid mb = addFile(e, blue, 3 * S, {320, 180});
+        const QUuid mr = addFile(e, red, 1 * S, {320, 180});
+        timeline::placeMedia(e, mb, 0, 0, 0, 3 * S);
+        timeline::placeMedia(e, mr, 1, 0, 0, S);
+        e.tracks[1].blend = TrackBlend::Screen;
+        QVERIFY2(render(e, smallPreset(), tmp.path() + "/s.mp4", &log), qPrintable(log));
+        QVERIFY(std::abs(durationOf(tmp.path() + "/s.mp4") - 3.0) < 0.15);
+        const QColor mg = pixelAt(ffmpeg, tmp.path() + "/s.mp4", 0.5, 160, 90, 320, 180);
+        QVERIFY2(mg.red() > 200 && mg.blue() > 200 && mg.green() < 50, qPrintable(mg.name()));
+        const QColor bl = pixelAt(ffmpeg, tmp.path() + "/s.mp4", 2.0, 160, 90, 320, 180);
+        QVERIFY2(bl.blue() > 200 && bl.red() < 50, qPrintable(bl.name()));
+    }
+
     void gifRangeAndLoudness()
     {
         const QString ffmpeg = Exporter::findFfmpeg();

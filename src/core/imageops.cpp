@@ -259,6 +259,23 @@ QImage posterizeImage(const QImage &src, int levels)
     return img;
 }
 
+QImage thresholdImage(const QImage &src, int level)
+{
+    if (src.isNull())
+        return src;
+    QImage img = argb(src);
+    for (int y = 0; y < img.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            const QRgb p = line[x];
+            const int l = (qRed(p) * 299 + qGreen(p) * 587 + qBlue(p) * 114) / 1000;
+            const int v = l > level ? 255 : 0;
+            line[x] = qRgba(v, v, v, qAlpha(p));
+        }
+    }
+    return img;
+}
+
 QImage rgbSplitImage(const QImage &src, int shift)
 {
     if (src.isNull() || shift <= 0)

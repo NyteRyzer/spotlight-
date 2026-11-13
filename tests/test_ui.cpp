@@ -184,6 +184,30 @@ private slots:
         view.setTracks({gl});
         const QColor mixL = view.currentFrame().pixel(158, 90);
         QVERIFY2(mixL.red() > 200 && mixL.blue() > 200, qPrintable(mixL.name())); // red bled left onto blue
+
+        // Threshold and colorize match the export test's expectations.
+        ViewTrack th;
+        th.layer.still = grey; // 96
+        th.layer.clip.fx.threshold = 0.5;
+        view.setTracks({th});
+        QCOMPARE(QColor(view.currentFrame().pixel(160, 90)), QColor(Qt::black));
+        QImage light(320, 180, QImage::Format_RGB32);
+        light.fill(QColor(176, 176, 176));
+        ViewTrack cz;
+        cz.layer.still = light;
+        cz.layer.clip.color.colorize = 1.0;
+        cz.layer.clip.color.colorizeColor = QColor(255, 0, 0);
+        view.setTracks({cz});
+        const QColor czc = view.currentFrame().pixel(160, 90);
+        QVERIFY2(czc.red() > 150 && czc.green() < 20 && czc.blue() < 20, qPrintable(czc.name()));
+        // Screen blend: red track over blue = magenta.
+        ViewTrack bb, rr;
+        bb.layer.still = blue;
+        rr.layer.still = red;
+        rr.blend = TrackBlend::Screen;
+        view.setTracks({bb, rr});
+        const QColor sc = view.currentFrame().pixel(160, 90);
+        QVERIFY2(sc.red() > 240 && sc.blue() > 240 && sc.green() < 20, qPrintable(sc.name()));
     }
 
     void designEffectsRender()

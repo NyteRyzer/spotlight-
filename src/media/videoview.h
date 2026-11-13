@@ -32,6 +32,7 @@ struct ViewTrack {
     ViewLayer outgoing;
     QString transition;          // xfade id
     double transitionProgress = 0; // 0 = all outgoing, 1 = all incoming
+    TrackBlend blend = TrackBlend::Normal; // how the track combines with those below
 };
 
 // Displays video. In simple mode (Source Monitor) it shows one sink's frames
