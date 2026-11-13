@@ -451,7 +451,9 @@ void TimelineWidget::paintRow(QPainter &p, const Row &row)
     QFont f = font();
     f.setBold(true);
     p.setFont(f);
-    p.drawText(header.adjusted(12, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, t.name);
+    p.drawText(header.adjusted(12, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft,
+               t.blend == TrackBlend::Normal ? t.name
+                   : t.name + QStringLiteral(" ") + QStringList{QString(), tr("◐ scr"), tr("◐ add"), tr("◐ lt")}.value(int(t.blend)));
     p.setFont(font());
 
     for (const auto &[rect, kind] : headerButtons(row)) {
@@ -946,6 +948,17 @@ void TimelineWidget::contextMenuEvent(QContextMenuEvent *e)
                        [this] { m_project->edit(tr("Add Track"), [](ProjectData &d) { d.addTrack(TrackType::Video); }); });
         menu.addAction(tr("Add Audio Track"), this,
                        [this] { m_project->edit(tr("Add Track"), [](ProjectData &d) { d.addTrack(TrackType::Audio); }); });
+        if (row >= 0 && m_project->data().tracks[row].isVideo()) {
+            QMenu *blend = menu.addMenu(tr("Blend Mode of \"%1\"").arg(m_project->data().tracks[row].name));
+            const QStringList names{tr("Normal"), tr("Screen (light leaks, fire)"), tr("Add (glow)"), tr("Lighten")};
+            for (int i = 0; i < names.size(); ++i) {
+                QAction *a = blend->addAction(names[i], this, [this, row, i] {
+                    m_project->edit(tr("Blend Mode"), [&](ProjectData &d) { d.tracks[row].blend = TrackBlend(i); });
+                });
+                a->setCheckable(true);
+                a->setChecked(int(m_project->data().tracks[row].blend) == i);
+            }
+        }
         if (row >= 0 && m_project->data().tracks[row].clips.isEmpty()) {
             menu.addAction(tr("Delete Empty Track \"%1\"").arg(m_project->data().tracks[row].name), this, [this, row] {
                 m_project->edit(tr("Delete Track"), [&](ProjectData &d) { d.tracks.removeAt(row); });

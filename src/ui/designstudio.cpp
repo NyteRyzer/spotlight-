@@ -160,11 +160,7 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
         });
         m_canvas->zoomToFit();
     });
-    connect(m_bgButton, &QPushButton::clicked, this, [this] {
-        const QColor c = QColorDialog::getColor(m_project->data().design.background, this, tr("Background"));
-        if (c.isValid())
-            m_project->edit(tr("Background Color"), [&](ProjectData &d) { d.design.background = c; });
-    });
+    connect(m_bgButton, &QPushButton::clicked, this, &DesignStudio::backgroundDialog);
 
     // ---- Layers dock ---------------------------------------------------
     m_layers->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
@@ -302,6 +298,13 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
                                                   [](DesignLayer &l, const QColor &c) { l.tintColor = c; }));
     bindSlider(imgForm, tr("Tint amount"), 0, 100, 0.01, [](const DesignLayer &l) { return l.tintAmount; },
                [](DesignLayer &l, double v) { l.tintAmount = v; });
+    auto *mask = new QComboBox(imgPage);
+    mask->addItems({tr("None"), tr("Rounded corners"), tr("Circle")});
+    imgForm->addRow(tr("Mask"), mask);
+    connect(mask, &QComboBox::activated, this, [this](int i) { editLayer(QString(), [i](DesignLayer &l) { l.imageMask = i; }); });
+    m_layerRefreshers << [mask](const DesignLayer &l) { mask->setCurrentIndex(std::clamp(l.imageMask, 0, 2)); };
+    bindSlider(imgForm, tr("Corner radius"), 0, 50, 0.01, [](const DesignLayer &l) { return l.maskRadius; },
+               [](DesignLayer &l, double v) { l.maskRadius = v; });
     m_typePages->addWidget(imgPage);
     // Text page
     auto *textPage = new QWidget(m_typePages);
@@ -333,6 +336,9 @@ DesignStudio::DesignStudio(Project *project, QWidget *parent)
                                  [](DesignLayer &l, const QColor &c) { l.textColor2 = c; }));
     bindSlider(textForm, tr("Gradient angle"), -180, 180, 1, [](const DesignLayer &l) { return l.textGradientAngle; },
                [](DesignLayer &l, double v) { l.textGradientAngle = v; });
+    bindSlider(textForm, tr("Curve"), -100, 100, 0.01, [](const DesignLayer &l) { return l.textCurve; },
+               [](DesignLayer &l, double v) { l.textCurve = v; })
+        ->setToolTip(tr("Bend the text into an arch (right) or a smile (left)"));
     bindCheck(textForm, tr("Italic"), [](const DesignLayer &l) { return l.italic; },
               [](DesignLayer &l, bool v) { l.italic = v; });
     auto *textAlign = new QComboBox(textPage);
@@ -842,6 +848,58 @@ void DesignStudio::exportImage()
         emit status(tr("Exported %1 (%2×%3)").arg(QFileInfo(path).fileName()).arg(img.width()).arg(img.height()));
     else
         emit status(tr("Could not write %1").arg(path));
+}
+
+void DesignStudio::backgroundDialog()
+{
+    const DesignDocument &doc = m_project->data().design;
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Background"));
+    auto *form = new QFormLayout(&dlg);
+    QColor c1 = doc.background, c2 = doc.background2;
+    auto *b1 = new QPushButton(&dlg);
+    auto *b2 = new QPushButton(&dlg);
+    setSwatch(b1, c1);
+    setSwatch(b2, c2);
+    auto *grad = new QCheckBox(tr("Gradient"), &dlg);
+    grad->setChecked(doc.backgroundGradient);
+    auto *angle = new QSpinBox(&dlg);
+    angle->setRange(-180, 180);
+    angle->setSuffix(QStringLiteral("°"));
+    angle->setValue(int(doc.backgroundAngle));
+    form->addRow(tr("Color"), b1);
+    form->addRow(grad);
+    form->addRow(tr("Second color"), b2);
+    form->addRow(tr("Angle"), angle);
+    connect(b1, &QPushButton::clicked, &dlg, [&] {
+        const QColor c = QColorDialog::getColor(c1, &dlg, tr("Background"));
+        if (c.isValid())
+            setSwatch(b1, c1 = c);
+    });
+    connect(b2, &QPushButton::clicked, &dlg, [&] {
+        const QColor c = QColorDialog::getColor(c2, &dlg, tr("Second Color"));
+        if (c.isValid()) {
+            setSwatch(b2, c2 = c);
+            grad->setChecked(true);
+        }
+    });
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    m_project->edit(tr("Background"), [&](ProjectData &d) {
+        d.design.background = c1;
+        d.design.background2 = c2;
+        d.design.backgroundGradient = grad->isChecked();
+        d.design.backgroundAngle = angle->value();
+    });
+}
+
+void DesignStudio::setGridVisible(bool visible)
+{
+    m_canvas->setGrid(visible, QSettings().value(QStringLiteral("design/grid"), 40).toInt());
 }
 
 QStringList DesignStudio::exportSizes(const QVector<QSize> &sizes, const QString &folder, const QString &baseName)

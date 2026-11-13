@@ -107,6 +107,12 @@ QPointF DesignCanvas::snapMove(const QRectF &box, const QUuid &movingId)
     const QSizeF c = doc().canvasSize;
     // Candidate lines: canvas edges and centre, other layers' edges and centres.
     QVector<double> xs{0, c.width() / 2, c.width()}, ys{0, c.height() / 2, c.height()};
+    if (m_grid) {
+        for (double x = m_gridSpacing; x < c.width(); x += m_gridSpacing)
+            xs << x;
+        for (double y = m_gridSpacing; y < c.height(); y += m_gridSpacing)
+            ys << y;
+    }
     for (const DesignLayer &o : doc().layers) {
         if (o.id == movingId || !o.visible)
             continue;
@@ -200,6 +206,17 @@ void DesignCanvas::paintEvent(QPaintEvent *)
         p.drawText(vt.mapRect(stamp), Qt::AlignCenter, tr("timestamp"));
     }
 
+    if (m_grid) {
+        p.save();
+        p.setTransform(vt);
+        p.setPen(QPen(QColor(255, 255, 255, 40), 0));
+        const QSizeF c = doc().canvasSize;
+        for (double x = m_gridSpacing; x < c.width(); x += m_gridSpacing)
+            p.drawLine(QLineF(x, 0, x, c.height()));
+        for (double y = m_gridSpacing; y < c.height(); y += m_gridSpacing)
+            p.drawLine(QLineF(0, y, c.width(), y));
+        p.restore();
+    }
     if (!m_snapLines.isEmpty()) {
         p.save();
         p.setTransform(vt);

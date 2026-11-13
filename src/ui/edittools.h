@@ -4,6 +4,8 @@
 #include "core/types.h"
 
 #include <QObject>
+#include <QStringList>
+#include <QVector>
 #include <QPointer>
 
 #include <functional>
@@ -17,6 +19,8 @@ class Project;
 class TimelinePlayer;
 class TimelineWidget;
 class MediaBin;
+struct ProjectData;
+struct ExportPreset;
 
 // Editing tools that need dialogs, FFmpeg or file I/O on top of the pure
 // timeline operations: freeze frame, reverse, remove silences, scene-cut
@@ -29,6 +33,10 @@ public:
 
     // Which timeline the tools act on (Video or Audio Studio).
     void setTimelineProvider(std::function<TimelineWidget *()> provider) { m_timeline = std::move(provider); }
+
+    // Renders `data` once per preset into `dir` (stops at the first failure).
+    QStringList renderQueue(const ProjectData &data, const QVector<ExportPreset> &queue,
+                            const QString &dir, const QString &baseName);
 
 public slots:
     void freezeFrame();
@@ -72,6 +80,15 @@ public slots:
     void swapWithNext();
     void fitToFill();
     void newColorMatte();
+
+    // v0.5 additions.
+    void closeAllGaps();
+    void duplicateToTrackAbove();
+    void insertGap();          // asks for a length, inserts at the playhead on all tracks
+    void trimSilence();        // trims dead air off the start and end of the clip
+    void exportMarkersCsv();
+    void normalizeSelected();  // peak-normalize every selected clip with sound
+    void exportQueue();        // render several export presets in one go
 
 signals:
     void status(const QString &message);

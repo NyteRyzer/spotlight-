@@ -1,5 +1,6 @@
 #include "core/designrender.h"
 #include "core/exporter.h"
+#include "core/exportpreset.h"
 #include "core/project.h"
 #include "core/timelineops.h"
 #include "core/titles.h"
@@ -651,6 +652,46 @@ private slots:
             QCOMPARE(QColor(shot.pixel(960, 540)), QColor(200, 30, 30));
             project->undoStack()->undo(); // import
             project->undoStack()->undo(); // matte
+
+            // Trim Silence: 1 s of silence, 2 s of tone, 1 s of silence.
+            const QString talk = tmp.path() + "/talk.wav";
+            QProcess gen2;
+            gen2.start(ffmpeg, {"-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                                "aevalsrc='if(between(t,1,3),0.5*sin(2*PI*440*t),0)':s=48000:d=4", talk});
+            QVERIFY(gen2.waitForFinished(30000));
+            const int mc = project->data().media.size();
+            video->mediaBin()->importFiles({talk});
+            QTRY_COMPARE_WITH_TIMEOUT(project->data().media.size(), mc + 1, 15000);
+            const QUuid talkId = project->data().media.last().id;
+            QUuid tc;
+            project->edit("Place", [&](ProjectData &d) {
+                tc = timeline::placeMedia(d, talkId, d.audioTrackIndices().value(1), 10 * kUsPerSecond);
+            });
+            QVERIFY(!tc.isNull());
+            video->timeline()->setSelection({tc});
+            tools->trimSilence();
+            const Clip *trimmed = project->data().clipById(tc);
+            QVERIFY(trimmed);
+            QVERIFY2(std::abs(usToSeconds(trimmed->duration()) - 2.3) < 0.15,
+                     qPrintable(QString::number(usToSeconds(trimmed->duration()))));
+            QCOMPARE(trimmed->start, 10 * kUsPerSecond); // ripple: still starts where it did
+            QVERIFY(std::abs(usToSeconds(trimmed->in) - 0.85) < 0.1);
+
+            // Normalize Selected: the 0.5-amplitude tone is raised towards -1 dB.
+            QTRY_VERIFY_WITH_TIMEOUT((tools->normalizeSelected(), project->data().clipById(tc)->gain > 1.5), 20000);
+
+            // Export queue: a GIF and a WAV in one go.
+            QVector<ExportPreset> queue;
+            for (const ExportPreset &p : builtInExportPresets()) {
+                if (p.container == "gif" || p.container == "wav")
+                    queue << p;
+            }
+            QCOMPARE(queue.size(), 2);
+            QTemporaryDir outDir;
+            const QStringList written = tools->renderQueue(project->data(), queue, outDir.path(), "Queue");
+            QCOMPARE(written.size(), 2);
+            for (const QString &f : written)
+                QVERIFY2(QFileInfo(f).size() > 1000, qPrintable(f));
         }
 
         // Design studio: text layer + undo.

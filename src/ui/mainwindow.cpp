@@ -240,6 +240,13 @@ void MainWindow::buildMenus()
     };
     addF(deliver, QStringLiteral("file.chapters"), tr("YouTube Chapters from Markers..."), QKeySequence(),
          [this] { m_tools->youtubeChapters(); });
+    addF(deliver, QStringLiteral("file.queue"), tr("Export Queue (several presets)..."), QKeySequence(tr("Ctrl+Alt+M")),
+         [this] {
+             m_video->programMonitor()->player()->pause();
+             m_tools->exportQueue();
+         });
+    addF(deliver, QStringLiteral("file.markerscsv"), tr("Export Markers (CSV)..."), QKeySequence(),
+         [this] { m_tools->exportMarkersCsv(); });
     addF(deliver, QStringLiteral("file.stems"), tr("Export Audio Stems..."), QKeySequence(), [this] {
         m_video->programMonitor()->player()->pause();
         m_tools->exportStems();
@@ -532,6 +539,19 @@ void MainWindow::buildMenus()
         [this] { m_tools->swapWithNext(); });
     add(QStringLiteral("timeline.fitfill"), tr("Fit to Fill (stretch into gap)"), QKeySequence(),
         [this] { m_tools->fitToFill(); });
+    add(QStringLiteral("timeline.closeallgaps"), tr("Close All Gaps (every track)"), QKeySequence(),
+        [this] { m_tools->closeAllGaps(); });
+    add(QStringLiteral("timeline.duplicateup"), tr("Duplicate to Track Above"), QKeySequence(tr("Ctrl+Shift+Up")),
+        [this] { m_tools->duplicateToTrackAbove(); });
+    add(QStringLiteral("timeline.insertgap"), tr("Insert Gap at Playhead..."), QKeySequence(),
+        [this] { m_tools->insertGap(); });
+    add(QStringLiteral("timeline.trimsilence"), tr("Trim Silence from Clip Start/End"), QKeySequence(),
+        [this] {
+            m_video->programMonitor()->player()->pause();
+            m_tools->trimSilence();
+        });
+    add(QStringLiteral("timeline.normalizesel"), tr("Normalize Selected Clips"), QKeySequence(),
+        [this] { m_tools->normalizeSelected(); });
     add(QStringLiteral("timeline.colormatte"), tr("New Color Matte..."), QKeySequence(),
         [this] { m_tools->newColorMatte(); });
     add(QStringLiteral("timeline.quickfades"), tr("Quick Fade In/Out"), QKeySequence(tr("Ctrl+Shift+D")),
@@ -684,6 +704,12 @@ void MainWindow::buildMenus()
         m_video->programMonitor()->view()->setGuidesVisible(on);
     });
     view->addAction(guides);
+    auto *grid = makeAction(this, QStringLiteral("view.grid"), tr("View"), tr("Show Design Grid"),
+                            QKeySequence(tr("Ctrl+'")));
+    grid->setCheckable(true);
+    grid->setToolTip(tr("A square grid in the Design Studio; layers snap to it"));
+    connect(grid, &QAction::toggled, this, [this](bool on) { m_design->setGridVisible(on); });
+    view->addAction(grid);
 
     // ---- Window ----
     QMenu *win = menuBar()->addMenu(tr("&Window"));

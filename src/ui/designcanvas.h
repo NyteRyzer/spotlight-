@@ -42,6 +42,14 @@ public:
     void zoomToFit();
     // Snap moved layers to the canvas edges and centre and to other layers.
     void setSnapping(bool on) { m_snapping = on; }
+    // Square grid every `spacing` canvas pixels; moved layers snap to it.
+    void setGrid(bool on, int spacing)
+    {
+        m_grid = on;
+        m_gridSpacing = std::max(4, spacing);
+        update();
+    }
+    bool gridVisible() const { return m_grid; }
     // Moves the selected layer by (dx, dy) canvas pixels (arrow keys).
     void nudgeSelected(double dx, double dy);
 
@@ -93,6 +101,8 @@ private:
     QPointF m_panOrig;
     bool m_spaceHeld = false;
     bool m_snapping = true;
+    bool m_grid = false;
+    int m_gridSpacing = 40;
     QVector<QLineF> m_snapLines; // canvas coords, shown while dragging
 };
 

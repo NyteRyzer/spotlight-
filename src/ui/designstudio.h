@@ -53,6 +53,10 @@ public slots:
     // layers (e.g. a captured video frame) are kept underneath.
     void applyTemplate(int index);
     void setGuidesVisible(bool visible);
+    // Grid overlay; layers snap to it while shown.
+    void setGridVisible(bool visible);
+    // Background color, or a two-color gradient.
+    void backgroundDialog();
 
 public:
     static QStringList templateNames();

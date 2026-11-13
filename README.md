@@ -31,6 +31,11 @@ mix its audio, then design its thumbnail, all in **one project**.
   **Fit to Fill** (speed a clip up or down to fill a gap exactly), **markers at every cut**, and **color mattes**
   (solid-color clips for slugs and backgrounds).
 - **Snapshot** any frame straight into the Media Bin (`Ctrl+Alt+S`).
+- **Close All Gaps** across every track at once (sync-safe), **Insert Gap** at the playhead, **Duplicate to
+  Track Above** (`Ctrl+Shift+↑`), **Trim Silence** off a clip's start and end, and **Normalize** every
+  selected clip in one go.
+- **Track blend modes:** set a video track to Screen, Add or Lighten so black disappears, for light leaks, fire,
+  sparks and glow overlays.
 - **Markers panel:** rename, jump and delete markers, and turn them into **YouTube chapters** for your description.
 - **Layered compositing.** Upper tracks sit on top of lower ones, so you can do **picture-in-picture**,
   **split screen**, overlays and logos.
@@ -40,13 +45,16 @@ mix its audio, then design its thumbnail, all in **one project**.
   Breaking News and Quote. They stay editable, with a live preview.
 - **Captions:** import and export **SRT** subtitles.
 - **Speed** from 0.1× to 8× (pitch-preserving audio), **reverse**, and **freeze frame**.
-- **Looks / filters:** Warm, Cool, Vivid, Cinematic, Vintage, Faded, Moody, Dreamy, B&W, Noir and Sepia. You can
+- **Looks / filters:** Warm, Cool, Vivid, Cinematic, Vintage, Faded, Moody, Dreamy, B&W, Noir, Sepia,
+  Teal & Orange, Golden Hour and Matrix. You can
   also fine-tune brightness, contrast, saturation, temperature, tint, vignette and blur.
 - **Chroma key** (green and blue screen), **Ken Burns** zoom and pan, and **stabilization**.
 - **Effects:** sharpen, film grain, pixelate (censor), invert, **glitch (RGB split)**, **posterize**,
+  **threshold (stencil)**, **colorize (duotone)**, **denoise**,
   **cinema bars**, hue and gamma, plus **blur fill**
   (the blurred background behind vertical clips) and a **border** for picture-in-picture.
-- **Animations:** slide in from the left, right or bottom, drop in from the top, pop in, and **camera shake**.
+- **Animations:** slide in from the left, right or bottom, drop in from the top, pop in, **camera shake**
+  and a **beat pulse** zoom.
 - **Auto-Clip for videos and stream VODs:** import a long video and SPOTLIGHT! finds the moments worth clipping
   (big reactions, hype, laughter, fast action) on its own. Review the clips with thumbnails and a preview, then
   add them to the timeline as a highlight reel or export each one, ready for Shorts, TikTok and Reels as vertical
@@ -62,7 +70,7 @@ mix its audio, then design its thumbnail, all in **one project**.
 ### 🎚 Audio Studio (Logic Pro)
 - Waveform timeline with a **mixer**: volume, pan, mute and solo.
 - Per-track effects: **dialogue cleanup** (denoise), **noise gate**, **de-esser**, **3-band EQ**, **compressor**,
-  **voice changer** (pitch shift), **robot voice**, **bass and treble**, **stereo widener**, **telephone/radio**,
+  **voice changer** (pitch shift), **robot voice**, **flanger**, **tremolo**, **vocal remover (karaoke)**, **bass and treble**, **stereo widener**, **telephone/radio**,
   **chorus**, **high-pass and low-pass filters**, **reverb**,
   **echo/delay**, **mono** and **limiter**.
 - **Detect tempo (BPM)** from a music clip and drop bar markers on the beat.
@@ -92,6 +100,8 @@ mix its audio, then design its thumbnail, all in **one project**.
   safe-zone guides (including the YouTube timestamp corner), and canvas presets for thumbnails, channel art,
   posters and stories. **Smart resize** refits your layout when you switch, say, from a thumbnail to a Shorts cover,
   and **Export All Sizes** renders a thumbnail, square post and story from one design in one click.
+- **Curved text** (arch or smile), **rounded and circular image masks**, **gradient backgrounds**, and a
+  **snap-to grid** (`Ctrl+'`).
 - **Copy / paste layer style** (`Ctrl+Shift+C` / `Ctrl+Shift+V`) moves shadows, glow, stroke and text styling
   between layers.
 - **Grab any video frame** as a layer, and send any design **to the timeline** as an intro or end card.
@@ -100,6 +110,8 @@ mix its audio, then design its thumbnail, all in **one project**.
 - **Autosave** and crash **recovery**, undo/redo for everything, relinking of moved media, and the last 10 saved
   versions kept in a **Backups** folder next to your project.
 - **Command palette** (`Ctrl+K`): type to find and run any command.
+- **Export Queue** (`Ctrl+Alt+M`): render a YouTube master, a vertical Short and a podcast MP3 in one go.
+  **Export markers** as CSV.
 - **Media Bin search and sort**, dimmed unused media, **Remove Unused Media**, **Show in Folder**, and
   **Collect Files** to copy a project and all its media into one folder.
 - **Customizable layouts** and **keyboard shortcuts**.

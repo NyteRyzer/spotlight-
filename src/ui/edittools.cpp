@@ -11,6 +11,7 @@
 #include "core/titles.h"
 #include "media/mediaprobe.h"
 #include "media/timelineplayer.h"
+#include "media/waveformcache.h"
 #include "ui/mediabin.h"
 #include "ui/recorddialog.h"
 #include "ui/timelinewidget.h"
@@ -35,6 +36,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMediaCaptureSession>
@@ -1361,6 +1363,228 @@ void EditTools::newColorMatte()
     }
     m_project->edit(tr("New Color Matte"), [&](ProjectData &d) { d.media.append(m); });
     emit status(tr("Added “%1” to the Media Bin — drag it onto the timeline.").arg(m.name));
+}
+
+// ---------------------------------------------------------------------------
+// v0.5 additions
+
+void EditTools::closeAllGaps()
+{
+    TimeUs removed = 0;
+    m_project->edit(tr("Close All Gaps"), [&](ProjectData &d) { removed = timeline::closeAllGaps(d); });
+    if (removed < 0)
+        emit status(tr("Unlock all tracks first — closing gaps moves everything."));
+    else
+        emit status(removed ? tr("Closed gaps: the timeline is %1 shorter.").arg(formatDuration(removed))
+                            : tr("No empty stretches on the timeline."));
+}
+
+void EditTools::duplicateToTrackAbove()
+{
+    const QUuid id = targetClip();
+    if (id.isNull()) {
+        emit status(tr("Select a clip to duplicate it onto the track above."));
+        return;
+    }
+    QUuid copy;
+    m_project->edit(tr("Duplicate to Track Above"), [&](ProjectData &d) { copy = timeline::duplicateToTrackAbove(d, id); });
+    if (TimelineWidget *tl = timeline(); tl && !copy.isNull())
+        tl->setSelection({copy});
+    emit status(tr("Duplicated above — try a blend mode, PIP layout or effect on the copy."));
+}
+
+void EditTools::insertGap()
+{
+    bool ok = false;
+    const double secs = QInputDialog::getDouble(m_window, tr("Insert Gap"),
+                                                tr("Insert empty time at the playhead (all tracks), in seconds:"),
+                                                QSettings().value(QStringLiteral("gap/seconds"), 1.0).toDouble(), 0.04,
+                                                600, 2, &ok);
+    if (!ok)
+        return;
+    QSettings().setValue(QStringLiteral("gap/seconds"), secs);
+    const TimeUs at = m_player->position();
+    m_project->edit(tr("Insert Gap"), [&](ProjectData &d) { timeline::insertGap(d, at, secondsToUs(secs)); });
+    emit status(tr("Inserted %1 s at %2.").arg(secs).arg(formatTimecode(at, m_project->data().sequence.frameRate)));
+}
+
+void EditTools::trimSilence()
+{
+    const QUuid id = targetClip();
+    const ProjectData &d = m_project->data();
+    const Clip *c = d.clipById(id);
+    const MediaItem *m = c ? d.mediaById(c->mediaId) : nullptr;
+    if (!c || !m || !m->hasAudio) {
+        emit status(tr("Select a clip with sound to trim the silence off its start and end."));
+        return;
+    }
+    const Clip clip = *c;
+    const double threshold = QSettings().value(QStringLiteral("silence/threshold"), -38.0).toDouble();
+    QString log;
+    if (!runAnalysis(m_window, tr("Finding dead air…"),
+                     analysis::silenceArgs(m->path, clip.in, clip.sourceDuration(), threshold, 200 * kUsPerMs), &log))
+        return;
+    const auto span = timeline::audibleSpan(analysis::parseSilences(log, clip.sourceDuration()),
+                                            clip.sourceDuration(), 150 * kUsPerMs);
+    if (span.second <= span.first) {
+        emit status(tr("This clip is silent all the way through."));
+        return;
+    }
+    if (span.first == 0 && span.second == clip.sourceDuration()) {
+        emit status(tr("No dead air at the start or end of this clip."));
+        return;
+    }
+    const TimeUs head = clip.start + clip.toTimeline(span.first);
+    const TimeUs tailCut = clip.toTimeline(clip.sourceDuration() - span.second);
+    m_project->edit(tr("Trim Silence"), [&](ProjectData &pd) {
+        // Tail first: the head trim shifts the clip.
+        if (tailCut > 0) {
+            if (const Clip *cc = pd.clipById(id))
+                timeline::rippleTrim(pd, id, cc->end() - tailCut, false);
+        }
+        if (head > clip.start)
+            timeline::rippleTrim(pd, id, head, true);
+    });
+    emit status(tr("Trimmed %1 of dead air.")
+                    .arg(formatDuration(clip.toTimeline(span.first) + tailCut)));
+}
+
+void EditTools::exportMarkersCsv()
+{
+    if (m_project->data().markers.isEmpty()) {
+        emit status(tr("There are no markers to export (press M to add one)."));
+        return;
+    }
+    QSettings s;
+    const QString dir = s.value(QStringLiteral("paths/markers"),
+                                QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+                            .toString();
+    QString path = QFileDialog::getSaveFileName(m_window, tr("Export Markers"),
+                                                QDir(dir).filePath(m_project->displayName() + tr(" markers.csv")),
+                                                tr("CSV (*.csv)"));
+    if (path.isEmpty())
+        return;
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".csv");
+    s.setValue(QStringLiteral("paths/markers"), QFileInfo(path).absolutePath());
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QMessageBox::warning(m_window, tr("Export Markers"), tr("Could not write %1").arg(path));
+        return;
+    }
+    f.write(timeline::markersCsv(m_project->data()).toUtf8());
+    emit status(tr("Exported %n marker(s) to %1", nullptr, int(m_project->data().markers.size())).arg(path));
+}
+
+void EditTools::normalizeSelected()
+{
+    const QVector<QUuid> ids = targetClips();
+    const ProjectData &d = m_project->data();
+    QHash<QUuid, double> gains;
+    int pending = 0;
+    for (const QUuid &id : ids) {
+        const Clip *c = d.clipById(id);
+        const MediaItem *m = c ? d.mediaById(c->mediaId) : nullptr;
+        if (!c || !m || !m->hasAudio)
+            continue;
+        const QVector<float> *peaks = WaveformCache::instance()->peaks(m->path);
+        if (!peaks) {
+            ++pending; // waveform still being analysed
+            continue;
+        }
+        const qsizetype b0 = qsizetype(c->in * WaveformCache::kPeaksPerSecond / kUsPerSecond);
+        const qsizetype b1 = qsizetype(c->out * WaveformCache::kPeaksPerSecond / kUsPerSecond);
+        float peak = 0;
+        for (qsizetype b = std::max<qsizetype>(0, b0); b < std::min(b1 + 1, peaks->size()); ++b)
+            peak = std::max(peak, (*peaks)[b]);
+        if (peak > 0.0001f)
+            gains.insert(id, std::clamp(std::pow(10.0, -1.0 / 20.0) / peak, 0.0, std::pow(10.0, 24.0 / 20.0)));
+    }
+    if (gains.isEmpty()) {
+        emit status(pending ? tr("Still analysing the audio — try again in a moment.")
+                            : tr("Select clips with sound to normalize them."));
+        return;
+    }
+    m_project->edit(tr("Normalize Clips"), [&](ProjectData &pd) {
+        for (auto it = gains.cbegin(); it != gains.cend(); ++it) {
+            if (Clip *c = pd.clipById(it.key()))
+                c->gain = it.value();
+        }
+    });
+    emit status(pending ? tr("Normalized %n clip(s); some are still being analysed.", nullptr, int(gains.size()))
+                        : tr("Normalized %n clip(s) to peak at −1 dB.", nullptr, int(gains.size())));
+}
+
+void EditTools::exportQueue()
+{
+    QDialog dlg(m_window);
+    dlg.setWindowTitle(tr("Export Queue"));
+    auto *form = new QFormLayout(&dlg);
+    auto *info = new QLabel(tr("Render the timeline with several presets in one go — e.g. a YouTube master, "
+                               "a vertical Short and a podcast MP3."),
+                            &dlg);
+    info->setWordWrap(true);
+    form->addRow(info);
+    QVector<QPair<QCheckBox *, ExportPreset>> boxes;
+    for (const ExportPreset &p : builtInExportPresets()) {
+        auto *cb = new QCheckBox(p.name, &dlg);
+        form->addRow(cb);
+        boxes.append({cb, p});
+    }
+    const bool range = m_project->data().hasRange();
+    auto *onlyRange = new QCheckBox(tr("Only the In/Out range"), &dlg);
+    onlyRange->setEnabled(range);
+    onlyRange->setChecked(range);
+    form->addRow(onlyRange);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Choose Folder && Export"));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    QVector<ExportPreset> queue;
+    for (const auto &[cb, p] : boxes) {
+        if (cb->isChecked())
+            queue << p;
+    }
+    if (queue.isEmpty())
+        return;
+    QSettings s;
+    const QString dir = QFileDialog::getExistingDirectory(
+        m_window, tr("Export To"),
+        s.value(QStringLiteral("paths/export"), QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)).toString());
+    if (dir.isEmpty())
+        return;
+    s.setValue(QStringLiteral("paths/export"), dir);
+    const ProjectData &pd = m_project->data();
+    const ProjectData data = onlyRange->isChecked() && range ? timeline::rangeProject(pd, pd.inPoint, pd.outPoint) : pd;
+    const QStringList written = renderQueue(data, queue, dir, m_project->displayName());
+    if (written.size() == queue.size())
+        emit status(tr("Exported %n file(s) to %1", nullptr, int(written.size())).arg(QDir::toNativeSeparators(dir)));
+}
+
+QStringList EditTools::renderQueue(const ProjectData &data, const QVector<ExportPreset> &queue, const QString &dir,
+                                   const QString &baseName)
+{
+    QStringList written;
+    for (int i = 0; i < queue.size(); ++i) {
+        const ExportPreset &p = queue[i];
+        QString tag = p.name;
+        tag.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9 _.-]")), QStringLiteral(""));
+        const QString out =
+            QDir(dir).filePath(QStringLiteral("%1 - %2.%3").arg(baseName, tag.simplified(), Exporter::extensionFor(p)));
+        QString err;
+        const QStringList args = Exporter::buildArguments(data, p, out, &err);
+        if (args.isEmpty()
+            || !runFfmpeg(m_window, tr("Exporting %1 of %2: %3…").arg(i + 1).arg(queue.size()).arg(p.name), args, &err)) {
+            if (err != tr("Cancelled."))
+                QMessageBox::warning(m_window, tr("Export Queue"), tr("%1 failed:\n\n%2").arg(p.name, err.right(1500)));
+            break;
+        }
+        written << out;
+    }
+    return written;
 }
 
 } // namespace spotlight

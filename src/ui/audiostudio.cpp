@@ -227,6 +227,7 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
              t.fx.reverbMix = 0.3;
          }},
         {tr("Robot"), tr("Metallic robot voice"), [](Track &t) { t.fx.robot = true; }},
+        {tr("Karaoke"), tr("Remove the lead vocal from a stereo song"), [](Track &t) { t.fx.karaoke = true; }},
         {tr("Bass Boost"), tr("+6 dB of low end, slightly wider stereo"),
          [](Track &t) {
              t.fx.bassDb = 6;
@@ -280,6 +281,10 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
            [](Track &t, double v) { t.fx.pitchSemitones = v; });
     check(voice, tr("Telephone / radio"), [](const Track &t) { return t.fx.telephone; },
           [](Track &t, bool on) { t.fx.telephone = on; });
+    check(voice, tr("Flanger (jet sweep)"), [](const Track &t) { return t.fx.flanger; },
+          [](Track &t, bool on) { t.fx.flanger = on; });
+    check(voice, tr("Tremolo (pulsing volume)"), [](const Track &t) { return t.fx.tremolo; },
+          [](Track &t, bool on) { t.fx.tremolo = on; });
     check(voice, tr("Robot voice"), [](const Track &t) { return t.fx.robot; },
           [](Track &t, bool on) { t.fx.robot = on; });
     check(voice, tr("Chorus (thicker, doubled)"), [](const Track &t) { return t.fx.chorus; },
@@ -293,6 +298,10 @@ TrackFxPanel::TrackFxPanel(Project *project, QWidget *parent)
     slider(tone, tr("Stereo width"), 0, 25, 0.1, QStringLiteral("×"), [](const Track &t) { return t.fx.stereoWidth; },
            [](Track &t, double v) { t.fx.stereoWidth = v; })
         ->setToolTip(tr("1× = as recorded, 0× = mono, above 1× = wider"));
+
+    check(tone, tr("Vocal remover (karaoke)"), [](const Track &t) { return t.fx.karaoke; },
+          [](Track &t, bool on) { t.fx.karaoke = on; })
+        ->setToolTip(tr("Cancels whatever is mixed to the centre of a stereo song — usually the lead vocal"));
 
     auto *filters = section(tr("Filters"));
     slider(filters, tr("High-pass (cut lows)"), 0, 100, 10, QStringLiteral(" Hz"),

@@ -317,7 +317,8 @@ QWidget *ClipInspector::buildVideoTab()
     motion->addItems(motionNames());
     motion->setToolTip(tr("Ken Burns: a slow zoom or pan across the clip.\n"
                           "Slide / Drop / Pop: an animated entrance over the first %1 s.\n"
-                          "Camera Shake: handheld wobble for impact moments.")
+                          "Camera Shake: handheld wobble for impact moments.\n"
+                          "Beat Pulse: a zoom thump on every beat at 120 BPM.")
                            .arg(kEntranceSeconds));
     mo->addRow(tr("Animation"), motion);
     connect(motion, &QComboBox::activated, this,
@@ -386,6 +387,26 @@ QWidget *ClipInspector::buildColorTab()
               [](Clip &c, double v) { c.color.vignette = v; });
     addSlider(fx, tr("Blur"), 0, 100, 0.01, [](const Clip &c) { return c.color.blur; },
               [](Clip &c, double v) { c.color.blur = v; });
+    addSlider(fx, tr("Colorize"), 0, 100, 0.01, [](const Clip &c) { return c.color.colorize; },
+              [](Clip &c, double v) { c.color.colorize = v; })
+        ->setToolTip(tr("Duotone: shadows stay dark, highlights take on the color"));
+    auto *colorizeBtn = new QPushButton;
+    fx->addRow(tr("Colorize color"), colorizeBtn);
+    connect(colorizeBtn, &QPushButton::clicked, this, [this] {
+        const Clip *c = m_project->data().clipById(m_clip);
+        if (!c)
+            return;
+        const QColor col = QColorDialog::getColor(c->color.colorizeColor, this, tr("Colorize Color"));
+        if (col.isValid())
+            editClip(QStringLiteral("colorizeColor"), [&](Clip &cl) {
+                cl.color.colorizeColor = col;
+                if (cl.color.colorize <= 0)
+                    cl.color.colorize = 1.0;
+            });
+    });
+    m_refreshers << [colorizeBtn](const Clip &c) {
+        colorizeBtn->setStyleSheet(QStringLiteral("background: %1; min-height: 18px;").arg(c.color.colorizeColor.name()));
+    };
 
     auto *reset = new QPushButton(tr("Reset Color"));
     page->addWidget(reset);
@@ -454,6 +475,11 @@ QWidget *ClipInspector::buildEffectsTab()
               [](Clip &c, double v) { c.fx.rgbSplit = v; });
     addSlider(style, tr("Posterize"), 0, 100, 0.01, [](const Clip &c) { return c.fx.posterize; },
               [](Clip &c, double v) { c.fx.posterize = v; });
+    addSlider(style, tr("Threshold (stencil)"), 0, 100, 0.01, [](const Clip &c) { return c.fx.threshold; },
+              [](Clip &c, double v) { c.fx.threshold = v; })
+        ->setToolTip(tr("0 = off. Turns the picture into pure black and white at this brightness"));
+    addCheck(style, tr("Denoise (cleaner low-light footage, on export)"), [](const Clip &c) { return c.fx.denoise; },
+             [](Clip &c, bool on) { c.fx.denoise = on; });
     addCheck(style, tr("Invert colors"), [](const Clip &c) { return c.fx.invert; },
              [](Clip &c, bool on) { c.fx.invert = on; });
     addCheck(style, tr("Cinema bars (2.39:1)"), [](const Clip &c) { return c.fx.cinemaBars; },
