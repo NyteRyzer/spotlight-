@@ -150,6 +150,27 @@ DesignRenderer::TextLayout DesignRenderer::textLayout(const DesignLayer &l)
                                   fm.ascent() + fm.descent() + boxPad));
         y += lineStep;
     }
+    // Curved text: wrap the outlines around a circle. Positive bends into an
+    // arch (∩), negative into a smile (∪); 1 = half a circle.
+    if (!qFuzzyIsNull(l.textCurve) && !t.path.isEmpty()) {
+        const QRectF pb = t.path.boundingRect();
+        const double angle = std::clamp(std::abs(l.textCurve), 0.0, 1.0) * M_PI;
+        const double R = pb.width() / angle;
+        const double cx = pb.center().x(), ymid = pb.center().y();
+        const bool up = l.textCurve > 0;
+        for (int i = 0; i < t.path.elementCount(); ++i) {
+            const QPainterPath::Element e = t.path.elementAt(i);
+            const double y = up ? e.y : 2 * ymid - e.y; // mirror for the ∪ shape
+            const double r = R + (ymid - y);
+            const double th = (e.x - cx) / R;
+            const double nx = cx + r * std::sin(th);
+            double ny = ymid + R - r * std::cos(th);
+            if (!up)
+                ny = 2 * ymid - ny;
+            t.path.setElementPositionAt(i, nx, ny);
+        }
+        t.boxes.clear(); // caption boxes don't follow the curve
+    }
     // Normalise so everything starts at the origin, leaving room for the outline.
     const qreal pad = l.outlineWidth;
     QRectF b = t.path.boundingRect().adjusted(-pad, -pad, pad, pad);
@@ -339,7 +360,24 @@ void DesignRenderer::paintContent(QPainter &p, const DesignLayer &l)
             p.setPen(Qt::white);
             p.drawText(localRect(l), Qt::AlignCenter, QStringLiteral("Missing image"));
         } else {
-            p.drawImage(QPointF(0, 0), img);
+            if (l.imageMask > 0) {
+                // Rounded-corner or circular crop (stroke and shadow follow it).
+                const QRectF r(QPointF(0, 0), QSizeF(img.size()));
+                QPainterPath clip;
+                if (l.imageMask == 2) {
+                    clip.addEllipse(r);
+                } else {
+                    const double rad = std::clamp(l.maskRadius, 0.0, 0.5) * std::min(r.width(), r.height());
+                    clip.addRoundedRect(r, rad, rad);
+                }
+                p.save();
+                p.setRenderHint(QPainter::Antialiasing);
+                p.setClipPath(clip, Qt::IntersectClip);
+                p.drawImage(QPointF(0, 0), img);
+                p.restore();
+            } else {
+                p.drawImage(QPointF(0, 0), img);
+            }
         }
         break;
     }
@@ -509,7 +547,18 @@ void DesignRenderer::renderLayer(QPainter &p, const DesignLayer &l)
 
 void DesignRenderer::render(QPainter &p, const DesignDocument &doc)
 {
-    p.fillRect(QRect(QPoint(0, 0), doc.canvasSize), doc.background);
+    const QRectF canvas(QPointF(0, 0), QSizeF(doc.canvasSize));
+    if (doc.backgroundGradient) {
+        const double a = qDegreesToRadians(doc.backgroundAngle);
+        const QPointF dir(std::cos(a), std::sin(a));
+        const double half = (std::abs(dir.x()) * canvas.width() + std::abs(dir.y()) * canvas.height()) / 2;
+        QLinearGradient g(canvas.center() - dir * half, canvas.center() + dir * half);
+        g.setColorAt(0, doc.background);
+        g.setColorAt(1, doc.background2);
+        p.fillRect(canvas, g);
+    } else {
+        p.fillRect(canvas, doc.background);
+    }
     for (const auto &l : doc.layers)
         renderLayer(p, l);
 }

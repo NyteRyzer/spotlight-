@@ -228,6 +228,24 @@ bool swapWithNext(ProjectData &d, const QUuid &clipId);
 // clip on its track starts (or at `until` when given). False if impossible.
 bool fitToFill(ProjectData &d, const QUuid &clipId, TimeUs until = -1);
 
+// Removes every stretch of time where no track has a clip, pulling
+// everything after it left (sync-safe, unlike closing gaps per track).
+// Returns the time removed; -1 if a locked track has clips (nothing done).
+TimeUs closeAllGaps(ProjectData &d);
+
+// Copies the clip onto the next track of its kind above it (creating a
+// track if needed), same time, unlinked — for PIP and blend-mode overlays.
+QUuid duplicateToTrackAbove(ProjectData &d, const QUuid &clipId);
+
+// The part of a clip's source between its leading and trailing silences
+// (silences as source-relative ranges from 0 to `duration`), keeping
+// `pad` of breathing room. {0, duration} when there is nothing to trim;
+// {0, 0} when the whole clip is silent.
+QPair<TimeUs, TimeUs> audibleSpan(const QVector<QPair<TimeUs, TimeUs>> &silences, TimeUs duration, TimeUs pad);
+
+// The markers as CSV (Name, Timecode, Seconds) for spreadsheets / editors.
+QString markersCsv(const ProjectData &d);
+
 // Splits a clip (and partners) at every time in `cuts` that falls inside it.
 int splitAtTimes(ProjectData &d, const QUuid &clipId, const QVector<TimeUs> &cuts);
 

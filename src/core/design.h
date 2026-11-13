@@ -74,6 +74,8 @@ struct DesignLayer {
     bool tint = false;       // colour overlay (duotone-style)
     QColor tintColor = QColor(255, 120, 0);
     double tintAmount = 0.5; // 0 .. 1
+    int imageMask = 0;       // 0 none, 1 rounded corners, 2 circle / ellipse
+    double maskRadius = 0.12; // rounded corners: radius as a fraction of the shorter side
 
     // Text
     QString text;
@@ -94,6 +96,7 @@ struct DesignLayer {
     bool textBox = false;       // filled box behind the text (caption style)
     QColor textBoxColor = QColor(0, 0, 0, 170);
     double textBoxPadding = 0.3; // fraction of the font size
+    double textCurve = 0.0;     // -1 .. 1: bend the text into an arc (∩ positive, ∪ negative)
 
     // Shape
     ShapeKind shape = ShapeKind::Rectangle;
@@ -128,6 +131,9 @@ QVector<CanvasPreset> canvasPresets();
 struct DesignDocument {
     QSize canvasSize = QSize(1280, 720); // YouTube thumbnail
     QColor background = QColor(24, 24, 28);
+    bool backgroundGradient = false;          // linear gradient from background to background2
+    QColor background2 = QColor(120, 40, 200);
+    double backgroundAngle = 90.0;            // degrees, 90 = top→bottom
     QVector<DesignLayer> layers;
 
     int indexOf(const QUuid &id) const;

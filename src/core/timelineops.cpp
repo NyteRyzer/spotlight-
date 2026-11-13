@@ -1332,4 +1332,87 @@ bool fitToFill(ProjectData &d, const QUuid &clipId, TimeUs until)
     return setClipSpeed(d, clipId, speed);
 }
 
+TimeUs closeAllGaps(ProjectData &d)
+{
+    QVector<QPair<TimeUs, TimeUs>> used;
+    for (const Track &t : d.tracks) {
+        for (const Clip &c : t.clips) {
+            if (t.locked)
+                return -1;
+            used.append({c.start, c.end()});
+        }
+    }
+    std::sort(used.begin(), used.end());
+    QVector<QPair<TimeUs, TimeUs>> gaps;
+    TimeUs cursor = 0;
+    for (const auto &u : used) {
+        if (u.first > cursor)
+            gaps.append({cursor, u.first});
+        cursor = std::max(cursor, u.second);
+    }
+    return gaps.isEmpty() ? 0 : rippleDeleteRanges(d, gaps);
+}
+
+QUuid duplicateToTrackAbove(ProjectData &d, const QUuid &clipId)
+{
+    int ti = -1;
+    const Clip *src = d.clipById(clipId, &ti);
+    if (!src)
+        return {};
+    const Clip copy = *src;
+    const bool video = d.tracks[ti].isVideo();
+    const QVector<int> same = video ? d.videoTrackIndices() : d.audioTrackIndices();
+    const int pos = int(same.indexOf(ti));
+    // "Above" is the next video track up, or the next audio track down.
+    int target = -1;
+    for (int k = pos + 1; k < same.size() && target < 0; ++k) {
+        const Track &t = d.tracks[same[k]];
+        bool busy = t.locked;
+        for (const Clip &o : t.clips)
+            busy = busy || (o.start < copy.end() && copy.start < o.end());
+        if (!busy)
+            target = same[k];
+    }
+    if (target < 0)
+        target = d.addTrack(video ? TrackType::Video : TrackType::Audio);
+    Clip c = copy;
+    c.id = QUuid::createUuid();
+    c.linkId = QUuid();
+    c.transition = Transition();
+    insertSorted(d.tracks[target], c);
+    return c.id;
+}
+
+QPair<TimeUs, TimeUs> audibleSpan(const QVector<QPair<TimeUs, TimeUs>> &silences, TimeUs duration, TimeUs pad)
+{
+    TimeUs from = 0, to = duration;
+    for (const auto &s : silences) {
+        if (s.first <= 0 && s.second > from)
+            from = s.second; // leading silence
+        if (s.second >= duration && s.first < to)
+            to = s.first;    // trailing silence
+    }
+    if (from >= to)
+        return {0, 0};
+    from = std::max<TimeUs>(0, from - pad);
+    to = std::min(duration, to + pad);
+    return {from, to};
+}
+
+QString markersCsv(const ProjectData &d)
+{
+    auto quote = [](QString s) {
+        if (s.contains(QLatin1Char(',')) || s.contains(QLatin1Char('"')) || s.contains(QLatin1Char('\n')))
+            s = QLatin1Char('"') + s.replace(QLatin1Char('"'), QStringLiteral("\"\"")) + QLatin1Char('"');
+        return s;
+    };
+    QString out = QStringLiteral("Name,Timecode,Seconds\n");
+    for (const Marker &m : d.markers) {
+        out += QStringLiteral("%1,%2,%3\n")
+                   .arg(quote(m.name), formatTimecode(m.time, d.sequence.frameRate),
+                        QString::number(usToSeconds(m.time), 'f', 3));
+    }
+    return out;
+}
+
 } // namespace spotlight::timeline

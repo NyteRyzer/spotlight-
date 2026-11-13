@@ -275,6 +275,51 @@ private slots:
 
 
     // Records a real take from the default input (skipped without one).
+    void designCurvesMasksAndGradients()
+    {
+        DesignRenderer r;
+        DesignLayer text;
+        text.type = LayerType::Text;
+        text.text = "CURVED TEXT";
+        text.fontSize = 60;
+        text.outlineWidth = 0;
+        const QRectF flat = r.localRect(text);
+        text.textCurve = 0.8;
+        const QRectF arched = r.localRect(text);
+        QVERIFY2(arched.height() > flat.height() * 1.5, "arched text should be taller");
+        QVERIFY(arched.width() < flat.width());
+
+        // Circle mask: the corner of an image layer is see-through.
+        QTemporaryDir tmp;
+        QImage red(100, 100, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        red.save(tmp.path() + "/red.png");
+        DesignDocument doc;
+        doc.canvasSize = QSize(100, 100);
+        doc.background = Qt::white;
+        DesignLayer img;
+        img.type = LayerType::Image;
+        img.imagePath = tmp.path() + "/red.png";
+        img.imageMask = 2;
+        doc.layers = {img};
+        QImage out = r.renderToImage(doc);
+        QCOMPARE(QColor(out.pixel(3, 3)), QColor(Qt::white));
+        QCOMPARE(QColor(out.pixel(50, 50)), QColor(Qt::red));
+
+        // Gradient background from black (top) to white (bottom).
+        doc.layers.clear();
+        doc.background = Qt::black;
+        doc.backgroundGradient = true;
+        doc.background2 = Qt::white;
+        doc.backgroundAngle = 90;
+        out = r.renderToImage(doc);
+        QVERIFY(QColor(out.pixel(50, 2)).red() < 20);
+        QVERIFY(QColor(out.pixel(50, 97)).red() > 235);
+        QVERIFY(std::abs(QColor(out.pixel(50, 50)).red() - 128) < 15);
+        // It survives a save/load.
+        QCOMPARE(DesignDocument::fromJson(doc.toJson()).background2, QColor(Qt::white));
+    }
+
     void designSmartResize()
     {
         DesignDocument doc;

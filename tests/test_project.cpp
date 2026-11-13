@@ -97,6 +97,10 @@ private slots:
         c->colorLabel = 4;
         c->fx.rgbSplit = 0.3;
         c->fx.posterize = 0.6;
+        c->fx.threshold = 0.4;
+        c->fx.denoise = true;
+        c->color.colorize = 0.7;
+        c->color.colorizeColor = QColor(0, 200, 255);
         c->name = "Hook";
         d.tracks[3].fx.telephone = true;
         d.tracks[3].fx.lowpassHz = 2500;
@@ -104,6 +108,9 @@ private slots:
         d.tracks[3].fx.bassDb = 5;
         d.tracks[3].fx.stereoWidth = 1.8;
         d.tracks[3].fx.robot = true;
+        d.tracks[3].fx.karaoke = d.tracks[3].fx.tremolo = true;
+        d.tracks[1].blend = TrackBlend::Screen;
+        d.design.layers[0].textCurve = -0.5;
         d.inPoint = S;
         d.outPoint = 3 * S;
         d.design.layers[0].textGradient = true;
@@ -148,6 +155,10 @@ private slots:
         QCOMPARE(back.tracks[3].fx.bassDb, 5.0);
         QCOMPARE(back.tracks[3].fx.stereoWidth, 1.8);
         QVERIFY(back.tracks[3].fx.robot);
+        QVERIFY(back.tracks[3].fx.karaoke && back.tracks[3].fx.tremolo && !back.tracks[3].fx.flanger);
+        QCOMPARE(back.tracks[1].blend, TrackBlend::Screen);
+        QCOMPARE(back.clipById(id)->color.colorizeColor, QColor(0, 200, 255));
+        QCOMPARE(back.design.layers[0].textCurve, -0.5);
         QCOMPARE(back.inPoint, S);
         QCOMPARE(back.outPoint, 3 * S);
         QVERIFY(back.design.layers[0].textGradient);

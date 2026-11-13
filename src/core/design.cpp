@@ -180,6 +180,8 @@ QJsonObject DesignLayer::toJson() const
         o["tint"] = tint;
         o["tintColor"] = colorToString(tintColor);
         o["tintAmount"] = tintAmount;
+        o["mask"] = imageMask;
+        o["maskRadius"] = maskRadius;
         break;
     case LayerType::Text:
         o["text"] = text;
@@ -200,6 +202,7 @@ QJsonObject DesignLayer::toJson() const
         o["textBox"] = textBox;
         o["textBoxColor"] = colorToString(textBoxColor);
         o["textBoxPadding"] = textBoxPadding;
+        o["curve"] = textCurve;
         break;
     case LayerType::Shape:
         o["shape"] = QString::fromLatin1(kShapeIds[int(shape)]);
@@ -282,6 +285,8 @@ DesignLayer DesignLayer::fromJson(const QJsonObject &o)
     l.tint = o["tint"].toBool();
     l.tintColor = colorFromValue(o["tintColor"], QColor(255, 120, 0));
     l.tintAmount = o["tintAmount"].toDouble(0.5);
+    l.imageMask = std::clamp(o["mask"].toInt(0), 0, 2);
+    l.maskRadius = o["maskRadius"].toDouble(0.12);
     l.text = o["text"].toString();
     l.fontFamily = o["fontFamily"].toString();
     l.fontSize = o["fontSize"].toInt(96);
@@ -300,6 +305,7 @@ DesignLayer DesignLayer::fromJson(const QJsonObject &o)
     l.textBox = o["textBox"].toBool();
     l.textBoxColor = colorFromValue(o["textBoxColor"], QColor(0, 0, 0, 170));
     l.textBoxPadding = o["textBoxPadding"].toDouble(0.3);
+    l.textCurve = std::clamp(o["curve"].toDouble(0.0), -1.0, 1.0);
     l.shape = ShapeKind::Rectangle;
     for (int i = 0; i < int(std::size(kShapeIds)); ++i) {
         if (o["shape"].toString() == QLatin1String(kShapeIds[i]))
@@ -365,6 +371,11 @@ QJsonObject DesignDocument::toJson() const
     o["width"] = canvasSize.width();
     o["height"] = canvasSize.height();
     o["background"] = colorToString(background);
+    if (backgroundGradient) {
+        o["backgroundGradient"] = true;
+        o["background2"] = colorToString(background2);
+        o["backgroundAngle"] = backgroundAngle;
+    }
     QJsonArray arr;
     for (const auto &l : layers)
         arr.append(l.toJson());
@@ -379,6 +390,9 @@ DesignDocument DesignDocument::fromJson(const QJsonObject &o)
     if (d.canvasSize.isEmpty())
         d.canvasSize = QSize(1280, 720);
     d.background = colorFromValue(o["background"], QColor(24, 24, 28));
+    d.backgroundGradient = o["backgroundGradient"].toBool();
+    d.background2 = colorFromValue(o["background2"], QColor(120, 40, 200));
+    d.backgroundAngle = o["backgroundAngle"].toDouble(90.0);
     for (const auto &v : o["layers"].toArray())
         d.layers.append(DesignLayer::fromJson(v.toObject()));
     return d;

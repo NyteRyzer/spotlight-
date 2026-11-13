@@ -685,6 +685,60 @@ private slots:
         checkInvariants(d);
     }
 
+    void closeAllGapsDuplicateTrimCsv()
+    {
+        ProjectData d = ProjectData::createDefault();
+        const QUuid m = addVideo(d, 20 * S); // linked audio
+        const QUuid a = timeline::placeMedia(d, m, 0, 0, 0, 2 * S);
+        const QUuid b = timeline::placeMedia(d, m, 0, 4 * S, 0, 2 * S); // 2 s gap before
+        const QUuid c = timeline::placeMedia(d, m, 0, 9 * S, 0, 1 * S); // 3 s gap before
+        // A title on V2 covering part of the second gap keeps that part.
+        const int v2 = d.addTrack(TrackType::Video);
+        MediaItem still;
+        still.id = QUuid::createUuid();
+        still.kind = MediaKind::Image;
+        still.hasVideo = true;
+        still.path = "/tmp/x.png";
+        d.media.append(still);
+        const QUuid t = timeline::placeMedia(d, still.id, v2, 6 * S, 0, 1 * S); // 6..7
+        QCOMPARE(timeline::closeAllGaps(d), 4 * S); // 2..4 and 7..9
+        QCOMPARE(d.clipById(b)->start, 2 * S);
+        QCOMPARE(d.clipById(t)->start, 4 * S);
+        QCOMPARE(d.clipById(c)->start, 5 * S);
+        checkInvariants(d);
+        QCOMPARE(timeline::closeAllGaps(d), TimeUs(0));
+
+        // Duplicate a onto the next free video track up: the default V2,
+        // then V3 (free at 0..2), then a new track.
+        int ti = -1;
+        const QUuid dup = timeline::duplicateToTrackAbove(d, a);
+        QVERIFY(d.clipById(dup, &ti));
+        QCOMPARE(ti, 1);
+        QVERIFY(d.clipById(dup)->linkId.isNull());
+        const QUuid dup2 = timeline::duplicateToTrackAbove(d, a);
+        QVERIFY(d.clipById(dup2, &ti));
+        QCOMPARE(ti, v2);
+        const int videoBefore = d.videoTrackIndices().size();
+        const QUuid dup3 = timeline::duplicateToTrackAbove(d, a);
+        QCOMPARE(d.videoTrackIndices().size(), videoBefore + 1);
+        QVERIFY(d.clipById(dup3, &ti) && d.tracks[ti].isVideo());
+        checkInvariants(d);
+
+        // Audible span: 1.0 s leading and 0.5 s trailing silence in 10 s.
+        const auto span = timeline::audibleSpan({{0, S}, {3 * S, 4 * S}, {9500000, 10 * S}}, 10 * S, 100000);
+        QCOMPARE(span.first, 900000);
+        QCOMPARE(span.second, 9600000);
+        QCOMPARE(timeline::audibleSpan({{0, 10 * S}}, 10 * S, 0).second, TimeUs(0)); // all silent
+        QCOMPARE(timeline::audibleSpan({}, 10 * S, 0).second, 10 * S);
+
+        // Markers as CSV, quoting names with commas.
+        d.markers.clear();
+        timeline::toggleMarker(d, 90 * S, 0, "Intro, part 1");
+        const QString csv = timeline::markersCsv(d);
+        QVERIFY(csv.startsWith("Name,Timecode,Seconds\n"));
+        QVERIFY2(csv.contains("\"Intro, part 1\",00:01:30:00,90.000"), qPrintable(csv));
+    }
+
     void colorMatteAndLayerStyle()
     {
         MediaItem matte;
